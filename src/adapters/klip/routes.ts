@@ -106,13 +106,17 @@ export const routes = {
     totalPagesPath: 'data.pagination.totalPages',
     maxLimit: 1000,
     quantityUnit: 'mt',
-    dateFormat: 'unknown' as const,
+    dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
+    verifiedOn: '2026-08-21',
     notes:
       'Envelope: data.contracts[] + data.pagination{total,page,limit,totalPages}. Honours limit=1000 ' +
       'un-clamped (6708 rows total). Rows carry unit="MT" - the TSD claim that contracts return kg is ' +
-      'CONTRADICTED by the data. Numerics arrive as STRINGS. Date filter format still unmeasured.',
+      'CONTRADICTED by the data. Numerics arrive as STRINGS, so parse rather than assume. ' +
+      'Date filter takes bare YYYY-MM-DD and genuinely filters: dateFrom=2030-01-01 -> 0, ' +
+      'dateTo=2020-12-31 -> 0, June window -> 1059. ISO-datetime, epoch-ms and DD/MM/YYYY each 400.',
   },
 
   contractById: {
