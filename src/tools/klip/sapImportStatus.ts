@@ -66,12 +66,12 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
     const route = routes.sapImports;
     const limit = Math.min(params.limit, CAP);
 
-    const cached = await cache.through(cache.keyFor('klip_sap_import_status', { limit }), async () => {
-      const upstream: Record<string, string | number | undefined> = {};
-      const limitParam = route.params.limit;
-      if (limitParam !== undefined) upstream[limitParam] = Math.min(limit, route.maxLimit || limit);
-      return walk<Row>({ route, filters: upstream, maxPages: 1 });
-    });
+    // KLIP ignores `limit` on this endpoint - 1, 10 and 200 all return exactly 50 rows,
+    // and there is no pagination envelope. Sending it would imply a control we do not
+    // have, so the cap is applied here on the rows KLIP chose to give us.
+    const cached = await cache.through(cache.keyFor('klip_sap_import_status', { limit }), async () =>
+      walk<Row>({ route, filters: {}, maxPages: 1 }),
+    );
 
     const walked = cached.value;
     const imports = walked.rows.slice(0, limit).map(mapRow);

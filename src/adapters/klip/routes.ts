@@ -41,6 +41,10 @@ export interface RouteContract {
     vesselName?: string;
     shipmentId?: string;
     location?: string;
+    /** KLIP spells this camelCase; transport_mode is silently ignored. */
+    transportMode?: string;
+    /** Free-text match. Honoured on /contracts. */
+    search?: string;
   };
   /** Where the row array lives in the response body, dot-separated. */
   rowsPath: string;
@@ -80,6 +84,11 @@ export const routes = {
   },
 
   contracts: {
+    // Parameter spellings probed individually on 2026-08-21 by comparing the reported
+    // total with and without each one: a parameter KLIP does not know is IGNORED, not
+    // rejected, so an unfiltered result set comes back looking like a filtered one.
+    // Honoured: page limit plant supplier product status transportMode search dateFrom dateTo
+    // IGNORED:  incoterm  transport_mode  plantCode  q  startDate/endDate  contract_date_from
     path: '/contracts',
     params: {
       page: 'page',
@@ -88,6 +97,8 @@ export const routes = {
       supplier: 'supplier',
       product: 'product',
       status: 'status',
+      transportMode: 'transportMode',
+      search: 'search',
       dateFrom: 'dateFrom',
       dateTo: 'dateTo',
     },
@@ -216,7 +227,9 @@ export const routes = {
 
   sapImports: {
     path: '/sap-master-v2/imports',
-    params: { limit: 'limit' },
+    // limit is IGNORED: 1, 10 and 200 all return exactly 50 rows. Sending it would
+    // imply a control the caller does not have.
+    params: {},
     rowsPath: 'data',
     totalPagesPath: '',
     maxLimit: 50,
@@ -225,9 +238,10 @@ export const routes = {
     authMiddleware: 'bearerAuth',
     verified: false,
     notes:
-      'data[] directly, with NO pagination envelope at all - the 50 rows returned are whatever the server ' +
-      'defaults to. Fields: id, import_date, import_timestamp, status, total_records, processed_records, ' +
-      'failed_records. Whether limit is honoured is unmeasured.',
+      'data[] directly, NO pagination envelope, and limit is IGNORED - 1, 10 and 200 all return 50 rows. ' +
+      'This endpoint can surface at most 50 records, full stop; the tool must say so rather than imply ' +
+      'the caller is seeing everything. Fields: id, import_date, import_timestamp, status, total_records, ' +
+      'processed_records, failed_records.',
   },
 } as const satisfies Record<string, RouteContract>;
 
