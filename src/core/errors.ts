@@ -11,6 +11,7 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'UNKNOWN_FILTER_VALUE'
   | 'UPSTREAM_AUTH'
+  | 'UPSTREAM_ROUTE_MISSING'
   | 'UPSTREAM_UNAVAILABLE'
   | 'GUARD_BLOCK'
   | 'RATE_LIMITED'
@@ -89,6 +90,20 @@ export const upstreamAuth = (): GatewayError =>
     retryable: false,
     severity: 'high',
   });
+
+/**
+ * A 404 from the LOGIN endpoint is a wrong path, not a refused credential. Reporting it
+ * as UPSTREAM_AUTH sends whoever is debugging to the KLIP team to ask about the service
+ * account, when the account is fine and the route map is wrong - which is precisely the
+ * gap TSD Appendix A exists to close.
+ */
+export const upstreamRouteMissing = (path: string, status: number): GatewayError =>
+  new GatewayError(
+    'UPSTREAM_ROUTE_MISSING',
+    `KLIP has no route at "${path}" (HTTP ${status}). This is a route-map error, not a credentials problem: ` +
+      'correct the path in src/adapters/klip/routes.ts. Check whether the base URL needs an /api prefix.',
+    { retryable: false, severity: 'high' },
+  );
 
 export const upstreamUnavailable = (why: string): GatewayError =>
   new GatewayError('UPSTREAM_UNAVAILABLE', `The KLIP data source is not responding (${why}).`, { retryable: true });

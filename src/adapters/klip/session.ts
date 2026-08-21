@@ -8,7 +8,7 @@
  */
 import { cfg } from './../../core/config.js';
 import { logger } from './../../core/logger.js';
-import { upstreamAuth } from './../../core/errors.js';
+import { upstreamAuth, upstreamRouteMissing } from './../../core/errors.js';
 import { Semaphore } from './../../core/semaphore.js';
 import { klipRequest, type KlipResponse } from './client.js';
 import { routes } from './routes.js';
@@ -68,6 +68,16 @@ async function login(): Promise<string> {
       degraded = true;
       logger.error({ status: res.status }, 'KLIP rejected the service-account credentials');
       throw upstreamAuth();
+    }
+    // 404/405 mean the path is wrong, not the password. Distinguishing them matters:
+    // one is a one-line fix in routes.ts, the other is a conversation with the KLIP team.
+    if (res.status === 404 || res.status === 405) {
+      degraded = true;
+      logger.error(
+        { status: res.status, path: routes.login.path, baseUrl: cfg.KLIP_BASE_URL },
+        'KLIP login path not found - the route map is wrong, credentials were never checked',
+      );
+      throw upstreamRouteMissing(routes.login.path, res.status);
     }
     if (res.status >= 400) {
       degraded = true;
