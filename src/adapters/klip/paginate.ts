@@ -65,8 +65,28 @@ function extractNumber(body: unknown, path: string, alternates: readonly string[
   return null;
 }
 
-export const TOTAL_PAGES_ALTERNATES = ['pagination.totalPages', 'meta.totalPages', 'totalPages', 'pagination.total_pages'] as const;
-export const TOTAL_ROWS_ALTERNATES = ['pagination.total', 'pagination.totalItems', 'meta.total', 'total', 'totalCount', 'pagination.totalRecords'] as const;
+// KLIP nests its pagination object under `data` on /contracts, /shipments and /trucking,
+// but puts it at the top level on /finance/payments. Probed 2026-08-21. Both shapes are
+// listed so a route whose explicit totalPagesPath is wrong still degrades to a search
+// rather than to null - reporting "page 1 of ?" when the answer was available.
+export const TOTAL_PAGES_ALTERNATES = [
+  'pagination.totalPages',
+  'data.pagination.totalPages',
+  'meta.totalPages',
+  'totalPages',
+  'pagination.total_pages',
+  'data.pagination.total_pages',
+] as const;
+export const TOTAL_ROWS_ALTERNATES = [
+  'pagination.total',
+  'data.pagination.total',
+  'pagination.totalItems',
+  'data.pagination.totalItems',
+  'meta.total',
+  'total',
+  'totalCount',
+  'pagination.totalRecords',
+] as const;
 
 export interface WalkOptions {
   route: RouteContract;

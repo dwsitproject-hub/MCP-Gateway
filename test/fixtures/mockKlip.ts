@@ -139,7 +139,8 @@ export function buildContracts(): MockContract[] {
 function paginate<T>(rows: T[], req: Request): { data: T[]; pagination: Record<string, number> } {
   const page = Math.max(1, Number(req.query.page ?? 1));
   const requested = Math.max(1, Number(req.query.limit ?? 20));
-  // The trap: silently clamp instead of erroring.
+  // The trap: silently clamp instead of erroring. Confirmed real on 2026-08-21 -
+  // /trucking and /finance/payments both return 500 rows for limit=1000, no error.
   const limit = Math.min(requested, MAX_LIMIT);
   const start = (page - 1) * limit;
   return {
@@ -151,6 +152,35 @@ function paginate<T>(rows: T[], req: Request): { data: T[]; pagination: Record<s
       totalPages: Math.max(1, Math.ceil(rows.length / limit)),
     },
   };
+}
+
+/**
+ * KLIP does not have ONE envelope, it has three. Probed against staging 2026-08-21:
+ *
+ *   /contracts          { success, data: { contracts[],          pagination } }
+ *   /shipments          { success, data: { shipments[], summary, pagination } }
+ *   /trucking           { success, data: { truckingOperations[], summary, pagination } }
+ *   /finance/payments   { success, data: [],            pagination }   <- pagination at TOP level
+ *   /sap-master-v2/...  { success, data: [] }                          <- no pagination at all
+ *
+ * The mock reproduces each shape exactly. A fixture that normalises them into one
+ * envelope would let a rowsPath bug pass the suite and fail against live KLIP -
+ * which is precisely how `rows=0` went unnoticed until the endpoints were probed.
+ */
+function nested<T>(key: string, rows: T[], req: Request, summary?: Record<string, unknown>): unknown {
+  const { data, pagination } = paginate(rows, req);
+  return { success: true, data: { [key]: data, ...(summary ? { summary } : {}), pagination } };
+}
+
+/** Rows in `data`, pagination alongside it rather than inside. Only /finance/payments. */
+function topLevel<T>(rows: T[], req: Request): unknown {
+  const { data, pagination } = paginate(rows, req);
+  return { success: true, data, pagination };
+}
+
+/** Bare array, no pagination envelope whatsoever. Only /sap-master-v2/imports. */
+function bare<T>(rows: T[]): unknown {
+  return { success: true, data: rows };
 }
 
 export function createMockKlip(state: MockState): Express {
@@ -211,7 +241,7 @@ export function createMockKlip(state: MockState): Express {
     if (product !== undefined) rows = rows.filter((c) => c.product.toLowerCase() === product.toLowerCase());
     if (status !== undefined) rows = rows.filter((c) => c.status.toLowerCase() === status.toLowerCase());
     if (supplier !== undefined) rows = rows.filter((c) => c.supplier.toLowerCase().includes(supplier.toLowerCase()));
-    res.json(paginate(rows, req));
+    res.json(nested('contracts', rows, req));
   });
 
   app.get('/api/contracts/:id', (req: Request, res: Response) => {
@@ -221,14 +251,15 @@ export function createMockKlip(state: MockState): Express {
       res.status(404).json({ message: 'not found' });
       return;
     }
-    res.json({ data: found });
+    res.json({ success: true, data: found });
   });
 
   app.get('/api/shipments', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     const contractId = (req.query.contractId as string | undefined) ?? '4700010001';
     res.json(
-      paginate(
+      nested(
+        'shipments',
         [
           {
             id: 'SHP-1',
@@ -246,6 +277,7 @@ export function createMockKlip(state: MockState): Express {
           },
         ],
         req,
+        { total: 1, status: { unplanned: 0, planned: 0, atDischargePort: 1, completed: 0, cancelled: 0 } },
       ),
     );
   });
@@ -254,7 +286,8 @@ export function createMockKlip(state: MockState): Express {
     if (!requireAuth(req, res)) return;
     const contractId = (req.query.contractId as string | undefined) ?? '4700010001';
     res.json(
-      paginate(
+      nested(
+        'truckingOperations',
         [
           { id: 'TRK-1', sequence: '1', contractId, plant: 'TJP', truckNumber: 'BK 1234 XY',
             sentDate: '2026-08-01', deliveredDate: '2026-08-01', qtySent: 30_000, qtyDelivered: 29_850 },
@@ -262,14 +295,18 @@ export function createMockKlip(state: MockState): Express {
             sentDate: '2026-08-02', deliveredDate: null, qtySent: 30_000, qtyDelivered: null },
         ],
         req,
+        { total: 2, status: { unplanned: 0, inProgress: 1, completed: 1, cancelled: 0 } },
       ),
     );
   });
 
+  // Live path UNKNOWN - every candidate 404s. This mock keeps the assumed shape so the
+  // tool stays covered, but it is a GUESS and must be re-probed once KLIP names the path.
   app.get('/api/quality', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json(
-      paginate(
+      nested(
+        'quality',
         [
           {
             id: 'QS-1',
@@ -290,10 +327,11 @@ export function createMockKlip(state: MockState): Express {
     );
   });
 
-  app.get('/api/payments', (req: Request, res: Response) => {
+  // Path is /finance/payments on live KLIP, and pagination sits at the TOP level.
+  app.get('/api/finance/payments', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json(
-      paginate(
+      topLevel(
         [
           { id: 'PAY-1', contractId: '4700010001', invoiceNumber: 'INV-1', invoiceDate: '2026-07-01',
             dueDate: '2026-07-31', paidDate: '2026-08-05', status: 'PAID', amount: 4_500_000_000, currency: 'IDR' },
@@ -310,7 +348,7 @@ export function createMockKlip(state: MockState): Express {
   app.get('/api/sap-master-v2/imports', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json(
-      paginate(
+      bare(
         [
           { id: 'IMP-88', startedAt: '2026-08-19T01:00:00.000Z', finishedAt: '2026-08-19T01:04:12.000Z',
             status: 'SUCCESS', rowsProcessed: 18_402, rowsFailed: 0, fileName: 'MASTER_V2_20260819.csv', message: null },
@@ -318,7 +356,6 @@ export function createMockKlip(state: MockState): Express {
             status: 'PARTIAL', rowsProcessed: 18_310, rowsFailed: 12, fileName: 'MASTER_V2_20260818.csv',
             message: '12 rows rejected on plant code validation' },
         ],
-        req,
       ),
     );
   });
