@@ -146,6 +146,23 @@ const Env = z.object({
   HUB_TOKEN_BODY: z.enum(['json', 'form']).default('json'),
   /** How long a Hub round trip may take before its state row expires. */
   HUB_STATE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  /**
+   * Acknowledge a plaintext http:// Downstream Hub.
+   *
+   * The Hub is the thing that decides WHO a user is, so the link to it carries the
+   * same weight as the database link. Over http the jwks_uri fetch is the sharp edge:
+   * substitute the key set and ID tokens for arbitrary users can be forged, which
+   * turns signature verification into theatre. The authorization code and PKCE
+   * verifier also cross the wire in clear - and PKCE defends against an intercepted
+   * code, not against an observer who sees the verifier alongside it.
+   *
+   * Permitted for a staging pilot on an internal network, refused outright once
+   * KLIP_ENV=production. Logged loudly on every boot either way.
+   */
+  HUB_ACK_PLAINTEXT: z
+    .string()
+    .default('false')
+    .transform((v) => v.toLowerCase() === 'true' || v === '1'),
 
   /**
    * The local password path, kept for exactly one break-glass account so the
@@ -202,6 +219,65 @@ function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
     console.error(`FATAL: refusing to boot in production:\n  - ${problems.join('\n  - ')}`);
     process.exit(1);
   }
+}
+
+/**
+ * The Downstream Hub link must be TLS for the same reason the database link must be:
+ * it carries authentication material, and the gateway trusts what comes back from it.
+ */
+function assertHubTls(cfg: z.infer<typeof Env>): void {
+  if (cfg.HUB_ISSUER === undefined) return;
+
+  const urls = [cfg.HUB_ISSUER, cfg.HUB_DISCOVERY_URL].filter((u): u is string => u !== undefined);
+  const plaintext = urls.filter((u) => {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'http:') return false;
+    // Loopback is not a network path anyone can occupy.
+    return !['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+  });
+  if (plaintext.length === 0) return;
+
+  const detail = [
+    `  Affected: ${plaintext.join(', ')}`,
+    '  Over plaintext the jwks_uri fetch can be substituted, letting an attacker on that',
+    '  network path forge an ID token for ANY user - the pilot allowlist is then the only',
+    '  thing standing between them and the connector. The authorization code and PKCE',
+    '  verifier are also exposed together, which defeats PKCE.',
+  ].join('\n');
+
+  if (cfg.KLIP_ENV === 'production') {
+    console.error(
+      [
+        'FATAL: Downstream Hub is configured over plaintext http, and KLIP_ENV=production.',
+        detail,
+        '  There is no acknowledged-plaintext path in production. Serve the Hub over https',
+        '  and update HUB_ISSUER and HUB_DISCOVERY_URL.',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
+
+  if (!cfg.HUB_ACK_PLAINTEXT) {
+    console.error(
+      [
+        'FATAL: Downstream Hub is configured over plaintext http.',
+        detail,
+        '  Fix: serve the Hub over https. If it cannot be yet and the Hub is internal-only,',
+        '  accept this deliberately for staging with HUB_ACK_PLAINTEXT=true - it is logged',
+        '  on every boot and will refuse to start under KLIP_ENV=production.',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
+
+  console.warn(
+    [
+      'WARNING: PLAINTEXT Downstream Hub connection, explicitly acknowledged.',
+      detail,
+      '  Accepted only because this is a staging pilot on an internal network.',
+      '  This MUST be resolved before Stage 7 - production will refuse to start.',
+    ].join('\n'),
+  );
 }
 
 function assertDatabaseTls(cfg: z.infer<typeof Env>): void {
@@ -303,6 +379,7 @@ function load(): Config {
   const cfg = parsed.data;
   assertNoPlaceholderSecrets(cfg);
   assertDatabaseTls(cfg);
+  assertHubTls(cfg);
   assertEnvironmentCoherence(cfg);
 
   const publicUrl = cfg.PUBLIC_URL.replace(/\/+$/, '');

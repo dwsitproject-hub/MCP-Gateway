@@ -123,6 +123,26 @@ export async function metadata(): Promise<HubMetadata> {
     }
   }
 
+  // config.ts guards the CONFIGURED urls; the discovery document is a separate input
+  // and can advertise anything. jwks_uri matters most - fetched over plaintext, its
+  // key set can be substituted and ID tokens forged for any user, so a signature check
+  // against it proves nothing. Refuse unless plaintext has been acknowledged, which
+  // config.ts already forbids under KLIP_ENV=production.
+  if (!cfg.HUB_ACK_PLAINTEXT) {
+    for (const field of ['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as const) {
+      const parsed = new URL(doc[field] as string);
+      const loopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+      if (parsed.protocol === 'http:' && !loopback) {
+        throw new HubError(
+          `the Hub advertises ${field} over plaintext http (${doc[field] as string}). ` +
+            'Refusing: an intercepted jwks_uri lets an attacker forge ID tokens. ' +
+            'Serve the Hub over https, or set HUB_ACK_PLAINTEXT=true for a staging pilot.',
+          'discovery_failed',
+        );
+      }
+    }
+  }
+
   const value = doc as HubMetadata;
   cachedMetadata = { at: now, value };
   logger.info({ issuer: value.issuer }, 'Downstream Hub OIDC metadata loaded');
