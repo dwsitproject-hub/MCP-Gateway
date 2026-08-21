@@ -58,6 +58,19 @@ const Env = z.object({
   DATABASE_SSL: z.enum(['disable', 'require', 'verify-full']).default('require'),
   /** PEM bundle for the database server's CA. Required when DATABASE_SSL=verify-full. */
   DATABASE_CA_PATH: z.string().optional(),
+  /**
+   * Deliberate, acknowledged acceptance of a PLAINTEXT link to a database on a
+   * private address - for when the managed instance has TLS switched off and turning
+   * it on needs a change window on a shared production server.
+   *
+   * Scoped narrowly on purpose: it does nothing for a public address, it is logged
+   * loudly on every boot, and it exists so the decision is recorded in config rather
+   * than made by editing the guard out. Remove it once TLS is enabled.
+   */
+  DATABASE_SSL_ACK_PLAINTEXT: z
+    .string()
+    .default('false')
+    .transform((v) => v.toLowerCase() === 'true' || v === '1'),
 
   /**
    * Which KLIP environment the adapter talks to. Surfaced in every tool result and
@@ -199,13 +212,38 @@ function assertDatabaseTls(cfg: z.infer<typeof Env>): void {
   // A plaintext connection to something that is not local is a real exposure, not a
   // preference: OAuth tokens and the whole audit trail cross that link.
   const local = /@(db|localhost|127\.0\.0\.1)[:/]/.test(cfg.DATABASE_URL);
+  // RFC 1918 - a VPC-internal address. Narrower exposure than the public internet,
+  // but still a network path other hosts in the VPC sit on.
+  const privateHost = /@(10\.|127\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(cfg.DATABASE_URL);
+
   if (cfg.DATABASE_SSL === 'disable' && !local) {
-    console.error(
-      'FATAL: DATABASE_SSL=disable, but DATABASE_URL points at a remote host. Refusing to send ' +
-        'OAuth tokens and audit records over an unencrypted link. Set DATABASE_SSL=require or verify-full.',
-    );
-    process.exit(1);
+    if (privateHost && cfg.DATABASE_SSL_ACK_PLAINTEXT) {
+      console.warn(
+        [
+          'WARNING: PLAINTEXT database connection, explicitly acknowledged.',
+          '  OAuth token hashes and the entire audit trail - user identities, tool',
+          '  parameters - cross the VPC unencrypted. Any host able to occupy that',
+          '  network path can read them.',
+          '  Accepted only because the address is private and TLS is pending a change',
+          '  window. Enable TLS on the instance, then remove DATABASE_SSL_ACK_PLAINTEXT.',
+        ].join('\n'),
+      );
+    } else {
+      console.error(
+        [
+          'FATAL: DATABASE_SSL=disable, but DATABASE_URL points at a remote host.',
+          '  Refusing to send OAuth tokens and audit records over an unencrypted link.',
+          '  Fix: enable TLS on the database, then set DATABASE_SSL=require (later verify-full).',
+          privateHost
+            ? '  If TLS cannot be enabled yet and the host is VPC-internal, this can be accepted' +
+              '\n  deliberately with DATABASE_SSL_ACK_PLAINTEXT=true - it is logged on every boot.'
+            : '  The host is not a private address, so there is no acknowledged-plaintext path.',
+        ].join('\n'),
+      );
+      process.exit(1);
+    }
   }
+
   if (cfg.NODE_ENV === 'production' && cfg.DATABASE_SSL === 'require') {
     console.warn(
       'WARNING: DATABASE_SSL=require encrypts but does NOT verify the database server certificate. ' +
