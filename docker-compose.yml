@@ -1,13 +1,21 @@
 # Production shape (TSD Section 9.3).
 #
-# T-2 binding rules:
-#   - the gateway publishes to 127.0.0.1 only; public reach is via nginx
-#   - gateway-db publishes NO host port, and is reachable only on the compose network
+# T-2 binding rule: the gateway publishes to 127.0.0.1 only; public reach is via nginx.
+#
+# THE DATABASE IS NOT HERE. The OAuth and audit store is a managed ApsaraDB for
+# PostgreSQL instance reached over the VPC via DATABASE_URL. TSD 9.3 originally put
+# Postgres in a container and flagged that as a risk in the same breath - "the same
+# pattern flagged as a production risk for jps-db ... migrate to RDS like the main
+# estate plan". Managed also brings backups, point-in-time recovery and patching that
+# a container volume on a 40 GB disk does not.
+#
+# Because the connection now leaves the host, DATABASE_SSL is not optional. See
+# src/core/db.ts; config.ts refuses to boot on a plaintext link to a remote host.
 #
 # Docker note: Docker writes its own iptables rules and bypasses ufw for published
-# ports. That is harmless here because the only publish is on loopback - but any
-# future `ports:` entry must be checked against the DOCKER-USER chain, because the
-# ufw "belt" will not hold it.
+# ports. Harmless here because the only publish is on loopback - but any future
+# `ports:` entry must be checked against the DOCKER-USER chain, because the ufw
+# "belt" will not hold it.
 
 services:
   gateway:
@@ -22,39 +30,27 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     volumes:
-      # Signing key mounted read-only from the host vault.
+      # Signing key mounted read-only from the host vault. Must be owned by uid 1000
+      # (the container's `node` user) or the app cannot read it.
       - ./secrets/oauth_signing.pem:/app/secrets/oauth_signing.pem:ro
-    depends_on:
-      db:
-        condition: service_healthy
+      # Database CA bundle, only needed when DATABASE_SSL=verify-full. Defaults to
+      # /dev/null so the mount always has a real source: Docker silently creates a
+      # DIRECTORY when a bind-mount source file is missing, which then fails to read
+      # as a certificate in a thoroughly confusing way.
+      - ${DATABASE_CA_HOST_PATH:-/dev/null}:/app/secrets/db-ca.pem:ro
     restart: unless-stopped
     stop_grace_period: 15s
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: gateway
-      POSTGRES_USER: gateway
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-    volumes:
-      - gateway_pgdata:/var/lib/postgresql/data
-    # No ports: section - compose network only (T-2).
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
-
   # Nightly pg_dump to /opt/backups/mcp-gateway with 14-day retention.
   # TSD Section 11 requires this; the implementation guide never created it, so it
   # would not have existed at go-live (review H10).
+  #
+  # ApsaraDB takes its own managed backups, so this is a second, independent copy in
+  # a format you can restore anywhere - it protects against losing access to the
+  # instance, not just against losing the instance.
   #
   # An off-host copy is still required: same-host backups die with the host, and the
   # rollback ladder explicitly contemplates rebuilding it. Sync /opt/backups to OSS,
@@ -65,14 +61,9 @@ services:
     volumes:
       - ./deploy/backup.sh:/usr/local/bin/backup.sh:ro
       - ${BACKUP_DIR:-/opt/backups/mcp-gateway}:/backups
+      - ${DATABASE_CA_HOST_PATH:-/dev/null}:/secrets/db-ca.pem:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "3" }
-
-volumes:
-  gateway_pgdata: {}

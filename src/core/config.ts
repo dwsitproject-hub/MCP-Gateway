@@ -40,6 +40,24 @@ const Env = z.object({
   PUBLIC_URL: z.string().url(),
 
   DATABASE_URL: z.string().min(10),
+  /**
+   * TLS to the database. The store is now a managed ApsaraDB instance reached over
+   * the VPC rather than a container on the compose network, so the connection leaves
+   * the host and must be encrypted.
+   *
+   *   verify-full - encrypt AND authenticate the server against DATABASE_CA_PATH.
+   *                 The only setting that resists a man-in-the-middle; use it.
+   *   require     - encrypt, but accept ANY certificate. Better than nothing, still
+   *                 spoofable by anything that can occupy the network path.
+   *   disable     - plaintext. Only for a container-local database.
+   *
+   * Relying on `?sslmode=` inside DATABASE_URL is deliberately avoided: how a driver
+   * interprets it is subtle, and getting it silently wrong means an unencrypted
+   * connection that looks fine.
+   */
+  DATABASE_SSL: z.enum(['disable', 'require', 'verify-full']).default('require'),
+  /** PEM bundle for the database server's CA. Required when DATABASE_SSL=verify-full. */
+  DATABASE_CA_PATH: z.string().optional(),
 
   /**
    * Which KLIP environment the adapter talks to. Surfaced in every tool result and
@@ -173,6 +191,29 @@ function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
   }
 }
 
+function assertDatabaseTls(cfg: z.infer<typeof Env>): void {
+  if (cfg.DATABASE_SSL === 'verify-full' && cfg.DATABASE_CA_PATH === undefined) {
+    console.error('FATAL: DATABASE_SSL=verify-full requires DATABASE_CA_PATH (the database CA bundle).');
+    process.exit(1);
+  }
+  // A plaintext connection to something that is not local is a real exposure, not a
+  // preference: OAuth tokens and the whole audit trail cross that link.
+  const local = /@(db|localhost|127\.0\.0\.1)[:/]/.test(cfg.DATABASE_URL);
+  if (cfg.DATABASE_SSL === 'disable' && !local) {
+    console.error(
+      'FATAL: DATABASE_SSL=disable, but DATABASE_URL points at a remote host. Refusing to send ' +
+        'OAuth tokens and audit records over an unencrypted link. Set DATABASE_SSL=require or verify-full.',
+    );
+    process.exit(1);
+  }
+  if (cfg.NODE_ENV === 'production' && cfg.DATABASE_SSL === 'require') {
+    console.warn(
+      'WARNING: DATABASE_SSL=require encrypts but does NOT verify the database server certificate. ' +
+        'Set DATABASE_SSL=verify-full with DATABASE_CA_PATH once you have the provider CA bundle.',
+    );
+  }
+}
+
 function assertEnvironmentCoherence(cfg: z.infer<typeof Env>): void {
   // A production build pointed at a staging URL (or vice versa) is the H7 failure mode.
   const base = cfg.KLIP_BASE_URL.toLowerCase();
@@ -223,6 +264,7 @@ function load(): Config {
   }
   const cfg = parsed.data;
   assertNoPlaceholderSecrets(cfg);
+  assertDatabaseTls(cfg);
   assertEnvironmentCoherence(cfg);
 
   const publicUrl = cfg.PUBLIC_URL.replace(/\/+$/, '');

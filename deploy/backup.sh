@@ -26,6 +26,31 @@ BACKUP_DIR=/backups
 HOUR="${BACKUP_HOUR:-18}"        # 18:00 UTC == 01:00 WIB
 MIN_BYTES="${BACKUP_MIN_BYTES:-2048}"
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "[backup] FATAL: DATABASE_URL is not set" >&2
+  exit 1
+fi
+
+# The store is a managed instance across the VPC, so the dump must use TLS as well.
+# Otherwise the nightly backup becomes the one plaintext copy of the entire audit
+# trail crossing the network. Respect an sslmode already present in the URL.
+CONN="$DATABASE_URL"
+case "$CONN" in
+  *sslmode=*)
+    : ;;                                   # caller has been explicit; leave it alone
+  *\?*)
+    SEP='&' ;;
+  *)
+    SEP='?' ;;
+esac
+if [ -n "${SEP:-}" ]; then
+  case "${DATABASE_SSL:-require}" in
+    disable)     : ;;
+    verify-full) CONN="${CONN}${SEP}sslmode=verify-full&sslrootcert=/secrets/db-ca.pem" ;;
+    *)           CONN="${CONN}${SEP}sslmode=require" ;;
+  esac
+fi
+
 mkdir -p "$BACKUP_DIR"
 
 log() { echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
@@ -35,9 +60,11 @@ run_dump() {
   raw="$BACKUP_DIR/.gateway-$stamp.sql"
   target="$BACKUP_DIR/gateway-$stamp.sql.gz"
 
-  # 1. dump to a real file so the exit code is pg_dump's own, not gzip's
-  if ! PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U gateway -d gateway \
-        --no-owner --no-privileges > "$raw" 2>"$raw.err"; then
+  # 1. dump to a real file so the exit code is pg_dump's own, not gzip's.
+  #    A connection URI carries host, port, user, password, database and sslmode in a
+  #    single value, so the backup follows DATABASE_URL to the managed instance and
+  #    there is no second copy of the credentials to drift out of sync.
+  if ! pg_dump "$CONN" --no-owner --no-privileges > "$raw" 2>"$raw.err"; then
     log "DUMP FAILED: $(tr -d '\n' < "$raw.err" | cut -c1-300)"
     rm -f "$raw" "$raw.err"
     return 1
