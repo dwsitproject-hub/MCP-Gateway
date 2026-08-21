@@ -1,0 +1,118 @@
+/**
+ * klip_quality_surveys - "DOBI at discharge for STO Z?"
+ *
+ * Quality measurements are NOT quantities: FFA, M&I, IV and DOBI pass through
+ * unconverted. Running them through kgToMt would be the classic unit accident.
+ */
+import { z } from 'zod';
+import { walk } from './../../adapters/klip/paginate.js';
+import { routes } from './../../adapters/klip/routes.js';
+import { fields, pickNumber, pickString, type Row } from './../../adapters/klip/fields.js';
+import { toDateOnly } from './../../adapters/klip/normalize.js';
+import { invalidParams } from './../../core/errors.js';
+import * as cache from './../../core/cache.js';
+import { buildFilters, localFilterNote, matchesLoosely } from './common.js';
+import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
+
+const CAP = 20;
+
+const inputShape = {
+  shipment_id: z.string().min(1).optional().describe('Shipment id or STO number.'),
+  contract_id: z.string().min(1).optional().describe('Contract id.'),
+  location: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Survey point, e.g. "discharge" or "loading", as klip_reference-style values appear in KLIP.'),
+};
+
+export const qualitySurveys: ToolDefinition<typeof inputShape> = {
+  name: 'klip_quality_surveys',
+  title: 'KLIP quality surveys',
+  cap: CAP,
+  description: describe(
+    'Quality survey results - FFA, M&I, IV and DOBI - by shipment, contract or survey location. ' +
+      'These are laboratory measurements in their own units (percentages and index values), not quantities, and are ' +
+      'reported exactly as KLIP holds them. At least one of shipment_id or contract_id is required.',
+    `Returns at most ${CAP} surveys.`,
+  ),
+  inputShape,
+
+  async handler(params): Promise<ToolOutcome> {
+    if (params.shipment_id === undefined && params.contract_id === undefined) {
+      throw invalidParams('Provide at least one of shipment_id or contract_id.', {
+        required_one_of: ['shipment_id', 'contract_id'],
+      });
+    }
+
+    const route = routes.quality;
+    const filterInput = {
+      shipment_id: params.shipment_id,
+      contract_id: params.contract_id,
+      location: params.location,
+    };
+    const filters = buildFilters(route, filterInput);
+
+    const cached = await cache.through(cache.keyFor('klip_quality_surveys', { ...filterInput }), async () =>
+      walk<Row>({ route, filters: filters.upstream, maxPages: 2 }),
+    );
+    const walked = cached.value;
+
+    let rows = walked.rows;
+    if (filters.local.length > 0) {
+      rows = rows.filter(
+        (row) =>
+          (!filters.local.includes('shipment_id') ||
+            matchesLoosely(pickString(row, fields.quality.shipmentId), params.shipment_id) ||
+            matchesLoosely(pickString(row, fields.quality.stoNumber), params.shipment_id)) &&
+          (!filters.local.includes('contract_id') ||
+            matchesLoosely(pickString(row, fields.quality.contractId), params.contract_id)) &&
+          (!filters.local.includes('location') ||
+            matchesLoosely(pickString(row, fields.quality.location), params.location)),
+      );
+    }
+
+    const surveys = rows.slice(0, CAP).map((row) => ({
+      shipment_id: pickString(row, fields.quality.shipmentId),
+      sto_number: pickString(row, fields.quality.stoNumber),
+      contract_id: pickString(row, fields.quality.contractId),
+      location: pickString(row, fields.quality.location),
+      survey_date: toDateOnly(pickString(row, fields.quality.surveyDate)),
+      surveyor: pickString(row, fields.quality.surveyor),
+      ffa_pct: pickNumber(row, fields.quality.ffa),
+      m_and_i_pct: pickNumber(row, fields.quality.mi),
+      iv: pickNumber(row, fields.quality.iv),
+      dobi: pickNumber(row, fields.quality.dobi),
+    }));
+
+    const data: Record<string, unknown> = {
+      surveys,
+      matching_surveys: rows.length,
+      units_note:
+        'FFA and M&I are percentages; IV (iodine value) and DOBI are dimensionless index values. ' +
+        'A null means the measurement is not recorded in KLIP for that survey, not that it is zero.',
+    };
+    const note = localFilterNote(filters.local);
+    if (note !== undefined) data.local_filter_note = note;
+    if (surveys.length === 0) {
+      data.empty_result_note =
+        'No surveys matched. Confirm the shipment or contract id before reporting that no survey exists.';
+    }
+
+    return {
+      data,
+      units: null,
+      rowCount: surveys.length,
+      truncated: walked.truncated || rows.length > CAP,
+      asOf: cached.fetchedAt,
+      fromCache: cached.fromCache,
+      coverage: {
+        fetched_rows: walked.fetchedRows,
+        total_rows: walked.totalRows,
+        pages_fetched: walked.pagesFetched,
+        total_pages: walked.totalPages,
+      },
+      klipCalls: walked.calls,
+    };
+  },
+};

@@ -1,0 +1,38 @@
+# --- Secrets (S5: no credentials in Git, images, or logs) ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Build / deps ---
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# --- Runtime / local ---
+logs/
+*.log
+backups/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Internal documents (this repository is PUBLIC) ---------------------
+# The design documents carry an "Internal - IT Confidential" marking, and the
+# deployment runbook is an operational map of a live host: public IP, SSH port,
+# security-group layout and the kill-switch procedure. Neither belongs in a public
+# repository. They stay on disk, untracked; keep them in a private repo or the
+# document store instead.
+docs/*.docx
+docs/MCP_Gateway_Phase1_Review.md
+docs/MCP_Gateway_Phase1_Implementation_Guide.md
+deploy/RUNBOOK.md
+
+# Keep the explanatory note that replaces them.
+!docs/README.md
