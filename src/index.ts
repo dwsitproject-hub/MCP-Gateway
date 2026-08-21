@@ -15,7 +15,7 @@ import { cfg } from './core/config.js';
 import { logger } from './core/logger.js';
 import { runMigrations } from './core/migrate.js';
 import { loadKeys } from './auth/keys.js';
-import { closePool } from './core/db.js';
+import { closePool, assertSchemaUsable } from './core/db.js';
 import { flush as flushAudit } from './core/audit.js';
 import { assertVerified, verificationGaps } from './adapters/klip/routes.js';
 import { pruneExpired } from './auth/tokens.js';
@@ -42,6 +42,9 @@ async function main(): Promise<void> {
     );
   }
 
+  // Prove the role can create objects BEFORE migrations try to, so the failure names
+  // the actual problem instead of surfacing as a half-applied migration.
+  await assertSchemaUsable();
   await runMigrations();
   await loadKeys();
 

@@ -33,8 +33,24 @@ function sslConfig(): PoolConfig['ssl'] {
   }
 }
 
+/**
+ * Pin the schema for every connection.
+ *
+ * All migration and runtime SQL uses unqualified names (`oauth_clients`,
+ * `audit_events`, and the partitions `ensure_audit_partitions()` creates at runtime),
+ * so they land wherever `search_path` points. On a managed instance that default is
+ * not ours to assume - observed on ApsaraDB, where a session resolved an unqualified
+ * CREATE TABLE into `information_schema` and failed with a permission error that
+ * reads like the role is wrong rather than the path.
+ *
+ * Sent as a startup parameter, so it is in force before the first statement rather
+ * than after a SET that some pooled connection might miss.
+ */
+const SCHEMA_OPTIONS = '-c search_path=public';
+
 export const pool = new Pool({
   connectionString: cfg.DATABASE_URL,
+  options: SCHEMA_OPTIONS,
   ...(cfg.DATABASE_SSL === 'disable' ? {} : { ssl: sslConfig() }),
   max: 10,
   idleTimeoutMillis: 30_000,
@@ -79,6 +95,34 @@ export async function isReachable(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Confirm the connection can actually create objects in the schema it will use.
+ * Ownership metadata and effective privilege are different things, and the failure
+ * otherwise surfaces halfway through migration 001.
+ */
+export async function assertSchemaUsable(): Promise<void> {
+  const rows = await query<{ search_path: string; usr: string; db: string }>(
+    'SELECT current_setting($1) AS search_path, current_user AS usr, current_database() AS db',
+    ['search_path'],
+  );
+  const info = rows[0];
+  logger.info(
+    { searchPath: info?.search_path, user: info?.usr, database: info?.db },
+    'database connection established',
+  );
+
+  try {
+    await query('CREATE TABLE IF NOT EXISTS public._mcp_perm_check (id int)');
+    await query('DROP TABLE IF EXISTS public._mcp_perm_check');
+  } catch (err) {
+    throw new Error(
+      `the database role cannot create objects in schema public (${(err as Error).message}). ` +
+        'Run: ALTER SCHEMA public OWNER TO <role>;  -- since PostgreSQL 15, owning the ' +
+        'database does not grant CREATE on its public schema.',
+    );
   }
 }
 
