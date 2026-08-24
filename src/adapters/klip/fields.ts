@@ -71,16 +71,30 @@ export function pickArray(row: Row | undefined, candidates: readonly string[]): 
 export const fields = {
   contract: {
     id: ['id', 'contractId', 'contract_id', 'contractNo', 'no_kontrak'],
-    poNumber: ['poNumber', 'po_number', 'poNo', 'no_po'],
+    // KLIP spells it PLURAL. A contract can carry several POs.
+    poNumber: ['po_numbers', 'poNumber', 'po_number', 'contract_ext_no', 'contract_reference_po', 'poNo'],
     supplier: ['supplier', 'supplierName', 'supplier_name', 'vendor', 'nama_supplier'],
     product: ['product', 'productName', 'product_name', 'commodity', 'produk'],
-    plant: ['plant', 'plantName', 'plant_name', 'location', 'pabrik'],
+    plant: ['plant_site', 'plant_code', 'plant', 'plantName', 'plant_name', 'location'],
     incoterm: ['incoterm', 'incoTerm', 'inco_term', 'terms', 'syarat_penyerahan'],
     status: ['status', 'contractStatus', 'contract_status', 'statusKontrak'],
-    // Quantities in KILOGRAMS (kg-labelled-as-MT trap).
-    qtyPo: ['qtyPo', 'qty_po', 'quantityPo', 'qtyKontrak', 'qty_kontrak', 'volume'],
-    shipped: ['totalKirim', 'total_kirim', 'qtyShipped', 'qty_shipped', 'shippedQty'],
-    received: ['totalTerima', 'total_terima', 'qtyReceived', 'qty_received', 'receivedQty'],
+    /**
+      * VERIFIED 2026-08-21 against live rows. The names assumed here originally
+      * (qtyPo / totalKirim / totalTerima) do not exist in KLIP, so every quantity read
+      * as null and every contract was flagged missing_qty_po - while the totals still
+      * printed "0 outstanding", which reads as a fact rather than as no-data.
+      *
+      * Rows carry their own `unit` field, observed as "MT". That CONTRADICTS the TSD's
+      * kg-labelled-as-MT warning for this endpoint; honour the row's unit, do not
+      * assume either way.
+      */
+    qtyPo: ['quantity_ordered', 'qtyPo', 'qty_po', 'quantityPo'],
+    shipped: ['quantity_delivery', 'qtyShipped', 'qty_shipped', 'shippedQty'],
+    received: ['quantity_receive', 'qtyReceived', 'qty_received', 'receivedQty'],
+    /** KLIP computes this itself - useful as a cross-check on our own arithmetic. */
+    outstandingUpstream: ['outstanding_quantity'],
+    /** Per-row unit of measure. Observed "MT" on contracts. */
+    unit: ['unit', 'uom', 'unitOfMeasure'],
     contractDate: ['contractDate', 'contract_date', 'tanggalKontrak', 'date'],
     remarks: ['remarks', 'remark', 'notes', 'keterangan'],
   },
@@ -90,26 +104,35 @@ export const fields = {
     stoNumber: ['stoNumber', 'sto_number', 'sto', 'stoNo'],
     contractId: ['contractId', 'contract_id', 'contract.id'],
     vesselName: ['vesselName', 'vessel_name', 'vessel', 'namaKapal'],
-    loadingPort: ['loadingPort', 'loading_port', 'portLoading', 'pelabuhanMuat'],
-    dischargePort: ['dischargePort', 'discharge_port', 'portDischarge', 'pelabuhanBongkar'],
+    loadingPort: ['port_of_loading', 'loadingPort', 'loading_port', 'portLoading'],
+    dischargePort: ['port_of_discharge', 'dischargePort', 'discharge_port', 'portDischarge'],
     status: ['status', 'shipmentStatus', 'shipment_status'],
-    etd: ['etd', 'ETD', 'estimatedDeparture'],
-    eta: ['eta', 'ETA', 'estimatedArrival'],
-    atd: ['atd', 'ATD', 'actualDeparture'],
-    ata: ['ata', 'ATA', 'actualArrival'],
-    qty: ['qty', 'quantity', 'qtyKirim', 'qty_kirim', 'volume'],
+    // KLIP exposes a whole eta_* ladder (arrival, berthed, loading_start,
+    // loading_complete, sailed, then the discharge-side equivalents) rather than a
+    // plain ETD/ETA pair. These map the nearest equivalent; the ladder is richer than
+    // the four fields this tool reports and is worth revisiting.
+    etd: ['eta_sailed', 'etd', 'ETD', 'estimatedDeparture'],
+    eta: ['eta_arrival', 'eta', 'ETA', 'estimatedArrival'],
+    atd: ['shipment_date', 'atd', 'ATD', 'actualDeparture'],
+    ata: ['arrival_date', 'ata', 'ATA', 'actualArrival'],
+    qty: ['quantity_shipped', 'quantity_delivered', 'qty', 'quantity'],
   },
 
   trucking: {
     id: ['id', 'truckingId', 'trucking_id'],
     sequence: ['sequence', 'seq', 'urutan', 'sequenceNo'],
     contractId: ['contractId', 'contract_id'],
-    plant: ['plant', 'plantName', 'location'],
-    sentDate: ['sentDate', 'sent_date', 'tanggalKirim', 'dateSent'],
-    deliveredDate: ['deliveredDate', 'delivered_date', 'tanggalTerima', 'dateDelivered'],
-    qtySent: ['qtySent', 'qty_sent', 'qtyKirim', 'qty_kirim'],
-    qtyDelivered: ['qtyDelivered', 'qty_delivered', 'qtyTerima', 'qty_terima'],
-    truckNumber: ['truckNumber', 'truck_number', 'noPolisi', 'plateNumber'],
+    plant: ['location', 'loading_location', 'plant', 'plantName'],
+    sentDate: ['trucking_start_date', 'realization_start_date', 'sentDate', 'sent_date'],
+    deliveredDate: ['trucking_completion_date', 'realization_end_date', 'deliveredDate', 'delivered_date'],
+    qtySent: ['quantity_sent', 'qtySent', 'qty_sent'],
+    qtyDelivered: ['quantity_delivered', 'qtyDelivered', 'qty_delivered'],
+    /**
+      * NOT PRESENT on live rows. /trucking returns OPERATIONS, not individual truck
+      * movements, so there is no plate number to report. Left in place so the reader
+      * returns null rather than inventing one; the tool description should not promise it.
+      */
+    truckNumber: ['truckNumber', 'truck_number', 'plateNumber'],
   },
 
   quality: {
@@ -141,12 +164,17 @@ export const fields = {
 
   sapImport: {
     id: ['id', 'importId', 'import_id', 'batchId'],
-    startedAt: ['startedAt', 'started_at', 'importDate', 'import_date', 'createdAt'],
+    // VERIFIED 2026-08-21. KLIP returns exactly: id, import_date, import_timestamp,
+    // status, total_records, processed_records, failed_records.
+    startedAt: ['import_timestamp', 'import_date', 'startedAt', 'started_at'],
+    /** NOT PRESENT - KLIP reports no completion time. Always null; do not imply duration. */
     finishedAt: ['finishedAt', 'finished_at', 'completedAt'],
-    status: ['status', 'importStatus', 'import_status', 'result'],
-    rowsProcessed: ['rowsProcessed', 'rows_processed', 'processed', 'totalRows', 'recordsProcessed'],
-    rowsFailed: ['rowsFailed', 'rows_failed', 'failed', 'errorCount', 'recordsFailed'],
-    fileName: ['fileName', 'file_name', 'file', 'source'],
-    message: ['message', 'errorMessage', 'error_message', 'detail', 'note'],
+    status: ['status', 'importStatus', 'import_status'],
+    rowsProcessed: ['processed_records', 'total_records', 'rowsProcessed', 'rows_processed'],
+    rowsFailed: ['failed_records', 'rowsFailed', 'rows_failed'],
+    /** NOT PRESENT on live rows. */
+    fileName: ['fileName', 'file_name', 'file'],
+    /** NOT PRESENT on live rows. */
+    message: ['message', 'errorMessage', 'error_message'],
   },
 } as const;
