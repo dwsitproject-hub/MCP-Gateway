@@ -20,8 +20,43 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-export const LOGIN_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+/**
+ * CSP for the sign-in and consent pages.
+ *
+ * form-action MUST list every origin a form submission can END UP at, not just where
+ * it POSTs. Chrome re-checks the directive on each redirect hop; Firefox does not,
+ * which is how this hides during development.
+ *
+ * Both buttons on this page post same-origin and then 302 elsewhere:
+ *   "Sign in and approve"        -> 302 to the OAuth client's redirect_uri (claude.ai)
+ *   "Continue with Downstream Hub" -> 302 to the Hub's authorization endpoint
+ *
+ * Under a bare `form-action 'self'` Chrome receives the 302 and silently declines to
+ * follow it. No error page, no console-visible navigation failure, nothing in the
+ * server log but a successful 302 - the button simply does nothing. Observed on
+ * 2026-08-24 against both buttons.
+ *
+ * So the origins are added explicitly and narrowly: only the redirect_uri of the
+ * client being authorized right now, plus the configured Hub. Keeping the directive
+ * (rather than dropping it) still blocks a form on this page being retargeted at an
+ * attacker's collector, which is the attack form-action exists to stop.
+ */
+export function loginCsp(allowedFormTargets: readonly string[] = []): string {
+  const origins = new Set<string>();
+  for (const raw of allowedFormTargets) {
+    try {
+      origins.add(new URL(raw).origin);
+    } catch {
+      // A malformed redirect_uri never reaches here - the client registry validates
+      // it - but a bad value must not be able to widen the policy either.
+    }
+  }
+  const formAction = ["'self'", ...origins].join(' ');
+  return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`;
+}
+
+/** Back-compat for pages with no outbound form target (error pages, IdP-initiated notice). */
+export const LOGIN_CSP = loginCsp();
 
 const STYLE = `
   :root { color-scheme: light dark; }

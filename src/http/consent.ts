@@ -24,7 +24,7 @@ import { createAuthorizationCode, verifyPending, type PendingAuthorization } fro
 import { admitHubIdentity, authenticate, setPassword } from './../auth/users.js';
 import * as hub from './../auth/hub.js';
 import {
-  LOGIN_CSP,
+  loginCsp,
   renderChangePasswordPage,
   renderErrorPage,
   renderLoginPage,
@@ -47,8 +47,11 @@ function checkCsrf(req: Request, pending: PendingAuthorization): boolean {
   return constantTimeEqual(submitted, pending.csrf) && constantTimeEqual(cookie, pending.csrf);
 }
 
-function sendHtml(res: Response, status: number, html: string): void {
-  res.status(status).setHeader('Content-Security-Policy', LOGIN_CSP);
+function sendHtml(res: Response, status: number, html: string, formTargets: readonly string[] = []): void {
+  // A re-rendered login page carries the same two off-origin buttons as the first
+  // render, so it needs the same form-action allowances. Omitting them here would make
+  // the buttons work on the first attempt and silently die after a failed password.
+  res.status(status).setHeader('Content-Security-Policy', loginCsp(formTargets));
   res.type('html').send(html);
 }
 
@@ -273,7 +276,7 @@ export function consentRouter(): Router {
         email,
         hubEnabled: cfg.hubEnabled,
         breakGlassEnabled: cfg.BREAK_GLASS_ENABLED,
-      }));
+      }), [pending.redirectUri, cfg.HUB_ISSUER ?? '']);
     };
 
     if (email === '' || password === '') {
@@ -298,7 +301,7 @@ export function consentRouter(): Router {
     }
 
     if (result.user.mustChangePassword) {
-      sendHtml(res, 200, renderChangePasswordPage({ pendingToken, csrfToken: pending.csrf, email: result.user.email }));
+      sendHtml(res, 200, renderChangePasswordPage({ pendingToken, csrfToken: pending.csrf, email: result.user.email }), [pending.redirectUri]);
       return;
     }
 

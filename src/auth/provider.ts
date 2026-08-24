@@ -23,7 +23,7 @@ import { logger } from './../core/logger.js';
 import * as audit from './../core/audit.js';
 import { clientsStore, isAllowedRedirectUri } from './clients.js';
 import { loadKeys } from './keys.js';
-import { renderLoginPage, LOGIN_CSP } from './loginPage.js';
+import { renderLoginPage, loginCsp } from './loginPage.js';
 import {
   SCOPE,
   canonicalResource,
@@ -207,7 +207,9 @@ export const provider: OAuthServerProvider = {
         maxAge: PENDING_TTL_SECONDS * 1000,
         path: '/authorize',
       })
-      .setHeader('Content-Security-Policy', LOGIN_CSP);
+      // Both buttons on this page 302 off-origin, and Chrome re-checks form-action on
+      // every redirect hop - so those destinations must be named or the buttons do nothing.
+      .setHeader('Content-Security-Policy', loginCsp([pending.redirectUri, cfg.HUB_ISSUER ?? '']));
     res.type('html').send(
       renderLoginPage({
         pendingToken,
