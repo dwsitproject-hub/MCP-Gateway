@@ -71,6 +71,30 @@ export function toWibIso(input: Date | string | number | null | undefined): stri
   return `${shifted.toISOString().slice(0, 19)}+07:00`;
 }
 
+/**
+ * Is this timestamp implausibly far in the future?
+ *
+ * KLIP stamps completed SAP imports ahead of the wall clock - observed 2026-08-24,
+ * where import_timestamp read 11:35:50Z while the true time was 08:05Z. The value
+ * carries an explicit Z, so toWibIso converts it correctly; the input itself is wrong.
+ * The likely cause is KLIP storing WIB wall-clock and serialising it with a Z suffix,
+ * but that is a THEORY, and quietly subtracting seven hours on a theory would turn a
+ * visible defect into an invisible one that silently corrupts every timestamp if the
+ * theory is wrong.
+ *
+ * So: report the value faithfully and mark it as not trustworthy. A tool that answers
+ * "did today's import work?" must not present a future completion time as simple fact.
+ *
+ * The tolerance absorbs ordinary clock skew between hosts without hiding a real error.
+ */
+const FUTURE_TOLERANCE_MS = 5 * 60_000;
+
+export function isImplausiblyFuture(iso: string | null, now: number = Date.now()): boolean {
+  if (iso === null) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && t - now > FUTURE_TOLERANCE_MS;
+}
+
 /** Date-only fields stay date-only: no spurious time component, no timezone shift. */
 export function toDateOnly(input: string | Date | null | undefined): string | null {
   if (input === null || input === undefined || input === '') return null;

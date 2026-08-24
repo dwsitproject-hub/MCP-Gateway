@@ -3,23 +3,7 @@
  * implementation guide, because every M1 accuracy failure passes through here.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  aggregateOutstanding,
-  basisFor,
-  classifyStatus,
-  COMPLETED_ZEROES_OUTSTANDING,
-  deviationDays,
-  gainLossKg,
-  groupByIncoterm,
-  kgToMt,
-  outstanding,
-  roundHalfAwayFromZero,
-  sumKg,
-  toDateOnly,
-  topByOutstanding,
-  toWibIso,
-  type ContractLineInput,
-} from '../src/adapters/klip/normalize.js';
+import { aggregateOutstanding, basisFor, classifyStatus, COMPLETED_ZEROES_OUTSTANDING, deviationDays, gainLossKg, groupByIncoterm, kgToMt, outstanding, roundHalfAwayFromZero, sumKg, toDateOnly, topByOutstanding, toWibIso, type ContractLineInput, isImplausiblyFuture } from '../src/adapters/klip/normalize.js';
 
 const line = (over: Partial<ContractLineInput> = {}): ContractLineInput => ({
   contract_id: 'C-1',
@@ -300,5 +284,39 @@ describe('timestamps', () => {
     expect(toDateOnly('2026-08-19')).toBe('2026-08-19');
     expect(toDateOnly('2026-08-19T23:30:00+07:00')).toBe('2026-08-19');
     expect(toDateOnly(null)).toBeNull();
+  });
+});
+
+describe('implausible future timestamps', () => {
+  // KLIP stamped a COMPLETED SAP import at 11:35:50Z while the real time was 08:05:19Z
+  // (observed 2026-08-24). The value carries an explicit Z so the WIB conversion is
+  // arithmetically right - the input is wrong. Reporting it as plain fact would let a
+  // tool answer "did today's import work?" with a time that has not happened.
+  const NOW = Date.parse('2026-08-24T08:05:19Z');
+
+  it('flags a completed-in-the-future timestamp', () => {
+    expect(isImplausiblyFuture('2026-08-24T18:35:50+07:00', NOW)).toBe(true);
+  });
+
+  it('accepts a normal past timestamp', () => {
+    expect(isImplausiblyFuture('2026-08-24T14:00:00+07:00', NOW)).toBe(false);
+  });
+
+  it('tolerates small clock skew rather than crying wolf', () => {
+    // Two minutes ahead is ordinary drift between hosts, not a data defect.
+    expect(isImplausiblyFuture(new Date(NOW + 2 * 60_000).toISOString(), NOW)).toBe(false);
+  });
+
+  it('flags anything beyond the tolerance', () => {
+    expect(isImplausiblyFuture(new Date(NOW + 20 * 60_000).toISOString(), NOW)).toBe(true);
+  });
+
+  it('treats a null timestamp as unremarkable, not as suspicious', () => {
+    // sapImport has no finished_at at all; absent must not read as a defect.
+    expect(isImplausiblyFuture(null, NOW)).toBe(false);
+  });
+
+  it('does not flag an unparseable value', () => {
+    expect(isImplausiblyFuture('not a date', NOW)).toBe(false);
   });
 });

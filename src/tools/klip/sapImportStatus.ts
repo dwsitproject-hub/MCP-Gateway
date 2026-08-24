@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { walk } from './../../adapters/klip/paginate.js';
 import { routes } from './../../adapters/klip/routes.js';
 import { fields, pickNumber, pickString, type Row } from './../../adapters/klip/fields.js';
-import { toWibIso } from './../../adapters/klip/normalize.js';
+import { toWibIso, isImplausiblyFuture } from './../../adapters/klip/normalize.js';
 import * as cache from './../../core/cache.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
 
@@ -80,6 +80,14 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
       data: {
         imports,
         latest: imports[0] ?? null,
+        // A completed import cannot have finished in the future. Surfacing this beats
+        // reporting the timestamp straight, and beats silently adjusting it.
+        clock_warning: imports.some((i) => isImplausiblyFuture(i.started_at))
+          ? 'KLIP reported a timestamp in the FUTURE for at least one import, so the times below are ' +
+            'not reliable. The import records themselves (status, row counts) are unaffected. ' +
+            'Do not use these timestamps to judge whether a run is recent; check the KLIP import ' +
+            'screen instead, and report the discrepancy to the KLIP team.'
+          : undefined,
         note:
           imports.length === 0
             ? 'KLIP returned no import records. This is an empty result, not a failed import.'
