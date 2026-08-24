@@ -45,9 +45,16 @@ async function linked(
   calls: CallRecord[],
   failures: string[],
 ): Promise<Row[]> {
-  const param = route.params.contractId;
+  // Only /finance/payments accepts a contract filter, and it spells it contract_id.
+  // /shipments and /trucking ignore contractId entirely and would return EVERY row,
+  // which this lookup would then present as "linked to your contract". Reporting the
+  // limitation is the only honest option until the join field on each row is known.
+  const param = (route.params as { contractId?: string }).contractId;
   if (param === undefined) {
-    failures.push(`${label}: KLIP exposes no contract filter on this endpoint (see Appendix A)`);
+    failures.push(
+      `${label}: KLIP exposes no contract filter on this endpoint, so linked ${label} cannot be listed here ` +
+        `(Appendix A - probed 2026-08-21). Query the ${label} tool directly.`,
+    );
     return [];
   }
   try {

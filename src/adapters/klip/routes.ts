@@ -134,12 +134,15 @@ export const routes = {
 
   shipments: {
     path: '/shipments',
+    // contractId, stoNumber, vesselName and status are NOT supported upstream - KLIP
+    // ignores them and returns all 348 rows. Omitting them here routes those filters to
+    // buildFilters()'s local[] fallback, which actually applies them. Declaring a
+    // parameter KLIP silently discards is the worst option: the answer looks filtered.
     params: {
       page: 'page',
       limit: 'limit',
-      contractId: 'contractId',
-      stoNumber: 'stoNumber',
-      vesselName: 'vesselName',
+      plant: 'plant',
+      search: 'search',
       dateFrom: 'dateFrom',
       dateTo: 'dateTo',
     },
@@ -147,23 +150,28 @@ export const routes = {
     totalPagesPath: 'data.pagination.totalPages',
     maxLimit: 500,
     quantityUnit: 'none',
-    dateFormat: 'unknown' as const,
+    dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
+    verifiedOn: '2026-08-21',
     notes:
       'Envelope: data.shipments[] + data.summary{} + data.pagination{}. Only 348 rows exist, so the page-size ' +
-      'ceiling is UNMEASURED - 500 is a floor, not a measurement. data.summary carries a full status breakdown ' +
-      '(unplanned/preplanned/planned/atLoadingPort/sailed/atDischargePort/completed/cancelled). Row-level ' +
-      'quantity unit not yet established.',
+      'ceiling is UNMEASURED - 500 is a safe floor, not a measurement. data.summary carries a full status ' +
+      'breakdown (unplanned/preplanned/planned/atLoadingPort/sailed/atDischargePort/completed/cancelled). ' +
+      'Dates take bare YYYY-MM-DD; ISO-datetime and DD/MM/YYYY each 400.',
   },
 
   trucking: {
     path: '/trucking',
+    // contractId and status are ignored upstream (5824 rows come back regardless), so
+    // they are deliberately absent and fall through to local filtering.
     params: {
       page: 'page',
       limit: 'limit',
-      contractId: 'contractId',
       plant: 'plant',
+      location: 'location',
+      search: 'search',
       dateFrom: 'dateFrom',
       dateTo: 'dateTo',
     },
@@ -171,9 +179,11 @@ export const routes = {
     totalPagesPath: 'data.pagination.totalPages',
     maxLimit: 500,
     quantityUnit: 'none',
-    dateFormat: 'unknown' as const,
+    dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
+    verifiedOn: '2026-08-21',
     notes:
       'Envelope: data.truckingOperations[] + data.summary{} + data.pagination{}. SILENTLY CLAMPS at 500: ' +
       'limit=1000 returns 500 rows with no error, against 5824 total (review H5). data.summary.outstandingQty ' +
@@ -208,13 +218,17 @@ export const routes = {
 
   payments: {
     path: '/finance/payments',
+    // contract_id is SNAKE_CASE here while every other endpoint uses camelCase -
+    // contractId is ignored. No date filtering exists at all: dateFrom/dateTo leave the
+    // total at 9011 and are not even format-validated, so they are omitted and applied
+    // locally instead.
     params: {
       page: 'page',
       limit: 'limit',
-      contractId: 'contractId',
+      contractId: 'contract_id',
+      supplier: 'supplier',
       status: 'status',
-      dateFrom: 'dateFrom',
-      dateTo: 'dateTo',
+      search: 'search',
     },
     rowsPath: 'data',
     totalPagesPath: 'pagination.totalPages',
@@ -222,10 +236,14 @@ export const routes = {
     quantityUnit: 'none',
     dateFormat: 'unknown' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
+    verifiedOn: '2026-08-21',
     notes:
       'Path is /finance/payments, NOT /payments. Pagination sits at the TOP LEVEL here, not under data - ' +
       'the only endpoint of the five shaped that way. SILENTLY CLAMPS at 500 against 9011 total. ' +
+      'Date filtering is UNSUPPORTED upstream and handled locally, which means a date-filtered payments ' +
+      'query has to page through up to 19 pages - watch it against the latency target. ' +
       'Amounts are currency, not quantities - never run them through kgToMt.',
   },
 
@@ -240,7 +258,9 @@ export const routes = {
     quantityUnit: 'none',
     dateFormat: 'unknown' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
+    verifiedOn: '2026-08-21',
     notes:
       'data[] directly, NO pagination envelope, and limit is IGNORED - 1, 10 and 200 all return 50 rows. ' +
       'This endpoint can surface at most 50 records, full stop; the tool must say so rather than imply ' +
