@@ -483,10 +483,26 @@ export function createMockKlip(state: MockState): Express {
    */
   app.get('/api/contracts/late-performance/summary', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
-    const narrowed =
+    /**
+     * The scope=filtered GATE, reproduced exactly.
+     *
+     * plant, supplier, product, incoterms and search do nothing without
+     * scope=filtered - KLIP parses and skips them. transportMode and the date range
+     * are not gated. A mock that honoured the gated filters unconditionally would let
+     * a missing-scope bug pass, which is the bug that actually shipped.
+     */
+    const gated = req.query.scope === 'filtered';
+    const gatedFilter =
+      req.query.plant !== undefined ||
+      req.query.supplier !== undefined ||
+      req.query.product !== undefined ||
+      req.query.incoterms !== undefined ||
+      req.query.search !== undefined;
+    const ungatedFilter =
       req.query.transportMode !== undefined ||
       req.query.dateFrom !== undefined ||
       req.query.dateTo !== undefined;
+    const narrowed = ungatedFilter || (gated && gatedFilter);
     const n = narrowed ? 40 : 254;
     res.json({
       success: true,

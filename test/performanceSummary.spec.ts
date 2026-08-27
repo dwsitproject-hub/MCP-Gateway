@@ -56,23 +56,27 @@ describe('the summary itself', () => {
   });
 });
 
-describe('the filters it refuses to pretend to support', () => {
-  it('has no plant, incoterm, status, supplier or product parameter', async () => {
-    // Accepting one KLIP discards would return company-wide figures labelled as one
-    // plant. A parameter absent from the schema is a visible limitation; one that
-    // silently does nothing is not.
-    const keys = Object.keys(tool.inputShape);
-    expect(keys).toEqual(['date_from', 'date_to', 'transport_mode']);
-    for (const forbidden of ['plant', 'incoterm', 'incoterms', 'status', 'supplier', 'product']) {
-      expect(keys).not.toContain(forbidden);
-    }
+describe('the filters it offers, and the one it does not', () => {
+  it('offers exactly the parameters KLIP demonstrably applies', async () => {
+    // A parameter absent from the schema is a visible limitation; one that silently does
+    // nothing is not. status is absent for that reason - see the gate suite below.
+    expect(Object.keys(tool.inputShape)).toEqual([
+      'date_from',
+      'date_to',
+      'transport_mode',
+      'plant',
+      'supplier',
+      'product',
+      'incoterm',
+      'search',
+    ]);
   });
 
-  it('says which dimensions cannot be broken down here, and where to go instead', async () => {
+  it('explains the one dimension it cannot narrow', async () => {
     const out = await tool.handler({} as never, ctx);
     const d = out.data as Record<string, any>;
-    expect(String(d.filters_unavailable)).toMatch(/KLIP ignores plant, incoterm, status/);
-    expect(String(d.filters_unavailable)).toContain('klip_outstanding');
+    expect(String(d.filters_unavailable)).toMatch(/No contract-status filter/);
+    expect(String(d.filters_unavailable)).toMatch(/split into open and closed/);
   });
 
   it('says the figures are company-wide when nothing narrowed them', async () => {
@@ -93,5 +97,46 @@ describe('attribution and units', () => {
     const out = await tool.handler({} as never, ctx);
     expect(out.units).toBeNull();
     expect(String((out.data as Record<string, any>).units_note)).toMatch(/NOT confirmed/);
+  });
+});
+
+describe('the scope=filtered gate', () => {
+  it('sends scope=filtered whenever a gated filter is set', async () => {
+    // Derived, not remembered. Without it KLIP returns the unfiltered YTD figures under
+    // the caller's plant filter - company-wide numbers labelled as one plant.
+    const out = await tool.handler({ plant: 'TJP' } as never, ctx);
+    expect((out.data as Record<string, any>).all_contracts.count).toBe(40);
+    const q = state.requests.filter((r) => r.path.includes('late-performance')).pop();
+    expect(q?.query.scope).toBe('filtered');
+    expect(q?.query.plant).toBe('TJP');
+  });
+
+  it('sends it for every gated filter, not just plant', async () => {
+    for (const [key, value] of [
+      ['supplier', 'Supplier A'],
+      ['product', 'CPO'],
+      ['incoterm', 'FOB'],
+      ['search', 'anything'],
+    ] as const) {
+      const out = await tool.handler({ [key]: value } as never, ctx);
+      expect((out.data as Record<string, any>).all_contracts.count).toBe(40);
+    }
+  });
+
+  it('does NOT send it when only ungated filters are used', async () => {
+    // transportMode and the dates work with or without the gate; adding it would change
+    // the meaning of the date window rather than leaving it alone.
+    await tool.handler({ transport_mode: 'SEA' } as never, ctx);
+    const q = state.requests.filter((r) => r.path.includes('late-performance')).pop();
+    expect(q?.query.scope).toBeUndefined();
+    expect(q?.query.transportMode).toBe('SEA');
+  });
+
+  it('still offers no contract-status filter', async () => {
+    // scope=filtered&status=Open leaves all four card counts unchanged on live KLIP,
+    // so it is a filter that would silently do nothing.
+    expect(Object.keys(tool.inputShape)).not.toContain('status');
+    const out = await tool.handler({} as never, ctx);
+    expect(String((out.data as Record<string, any>).filters_unavailable)).toMatch(/does not narrow/i);
   });
 });

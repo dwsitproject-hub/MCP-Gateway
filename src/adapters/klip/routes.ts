@@ -43,8 +43,19 @@ export interface RouteContract {
     location?: string;
     /** KLIP spells this camelCase; transport_mode is silently ignored. */
     transportMode?: string;
-    /** Free-text match. Honoured on /contracts. */
+    /** Free-text match. Honoured on /contracts and on the aggregate endpoint. */
     search?: string;
+    /**
+     * Incoterm filter. KLIP spells it PLURAL and comma-separated on both endpoints
+     * that support it. Added to /contracts on 27 Aug 2026.
+     */
+    incoterm?: string;
+    /**
+     * The gate on /contracts/late-performance/*. Only `filtered` enables the other
+     * filters; anything else - including any value we might invent - leaves them parsed
+     * and skipped, and the endpoint answers the unfiltered YTD question instead.
+     */
+    scope?: string;
   };
   /** Where the row array lives in the response body, dot-separated. */
   rowsPath: string;
@@ -97,6 +108,11 @@ export const routes = {
       supplier: 'supplier',
       product: 'product',
       status: 'status',
+      // Added by KLIP on 27 Aug 2026 at our request, and NOT behind scope on this
+      // endpoint. Verified: incoterms=FOB -> 688 of 6,870, incoterms=x-nonexistent -> 0.
+      // Singular `incoterm` is accepted too; the plural is used for consistency with the
+      // aggregate endpoint.
+      incoterm: 'incoterms',
       transportMode: 'transportMode',
       search: 'search',
       dateFrom: 'dateFrom',
@@ -264,21 +280,39 @@ export const routes = {
    * page renders. Aggregated across the full filtered dataset with NO pagination, which
    * is what makes them coherent where our page-bounded totals are not.
    *
-   * FILTER SUPPORT IS MUCH NARROWER THAN DOCUMENTED. KLIP's remediation listed status,
-   * supplier, buyer, companyCode, plant, product(s), sourceType(s), transportMode,
-   * b2bFlag, dateFrom/dateTo, scope and search as server-side. Probed 27 Aug 2026, only
-   * two of those actually change the response:
+   * scope=filtered IS THE SWITCH THAT TURNS THE OTHER FILTERS ON.
    *
-   *   HONOURED   transportMode, dateFrom/dateTo
-   *   IGNORED    incoterms, status, plant   (tested against scope=all/open/close/ytd
-   *                                          and with no scope - 15 combinations)
+   * Without it the endpoint answers the unfiltered YTD question and every gated filter
+   * is parsed and then skipped. KLIP's source:
    *
-   * `plant=x-nonexistent` returning a byte-identical response is conclusive: an applied
-   * filter matching nothing cannot leave the aggregates unchanged.
+   *   const scope = String(req.query.scope ?? 'ytd').toLowerCase();
+   *   statusNorm = scope === 'filtered' ? status.trim() : '';
+   *   if (scope === 'filtered' && selectedIncoterms) { ... }
    *
-   * So the tool built on this route exposes ONLY the two working parameters. Accepting a
-   * plant filter that KLIP discards would return company-wide figures labelled as one
-   * plant, which is the worst failure this connector can produce.
+   * We got this wrong first time round in a way worth recording. We tested `scope` with
+   * all / open / close / ytd - four values we invented - saw no effect, and reported the
+   * filters as broken. The one value that matters was never tried. Guessing a parameter's
+   * accepted values and concluding from their failure is not a measurement.
+   *
+   * Verified 27 Aug 2026 against live staging, statusCardSummary counts:
+   *
+   *   (none)                              233, 262, 1817, 1848
+   *   plant=x-nonexistent                 233, 262, 1817, 1848   <- gate closed
+   *   scope=filtered&plant=x-nonexistent    0,   0,    0,    0
+   *   scope=filtered&incoterms=FOB         11,  21,    4,  164
+   *   scope=filtered&incoterms=LCO         85, 125,  358,  619
+   *   scope=filtered&incoterms=FOB,LCO     96, 146,  362,  783
+   *
+   * The multi-value row partitions exactly - 11+85=96, 21+125=146, 4+358=362,
+   * 164+619=783 - which proves it selects rather than merely perturbs.
+   *
+   * STILL NOT WORKING: `status`. scope=filtered&status=Open leaves all four counts
+   * unchanged, while plant, search and incoterms all narrow. KLIP lists it as gated and
+   * its source reads statusNorm from it, so either the accepted vocabulary differs here
+   * or the gate is vestigial. NOT exposed until answered - the endpoint already splits
+   * open from close in its own output, so nothing is lost.
+   *
+   * NOT gated, working with or without scope: transportMode, dateFrom / dateTo.
    *
    * Units of totalQtyDelivery / openOutstandingQty / closeOutstandingQty are NOT
    * established and are not converted.
@@ -286,6 +320,12 @@ export const routes = {
   latePerformanceSummary: {
     path: '/contracts/late-performance/summary',
     params: {
+      scope: 'scope',
+      plant: 'plant',
+      supplier: 'supplier',
+      product: 'product',
+      incoterm: 'incoterms',
+      search: 'search',
       transportMode: 'transportMode',
       dateFrom: 'dateFrom',
       dateTo: 'dateTo',

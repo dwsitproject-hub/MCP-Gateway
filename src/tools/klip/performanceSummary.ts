@@ -6,26 +6,26 @@
  * with no pagination. Per the 24 August ruling, the KLIP outstanding rules govern, so
  * these are the authoritative figures.
  *
- * WHY THIS IS A SEPARATE TOOL RATHER THAN A MODE OF klip_outstanding
+ * THE scope=filtered GATE
  *
- * The endpoint honours only two of the thirteen filters KLIP documented. Probed 27 Aug
- * across scope=all/open/close/ytd and with no scope, 15 combinations:
+ * Filters on this endpoint do nothing unless scope=filtered is sent with them. KLIP
+ * parses them and skips them, answering the unfiltered YTD question instead - so a plant
+ * filter without the gate returns company-wide figures that read as one plant's.
  *
- *   HONOURED   transportMode, dateFrom / dateTo
- *   IGNORED    incoterms, status, plant
+ * That trap is closed by construction: the scope flag is DERIVED from which filters are
+ * present, so a caller cannot set one without the other. Relying on remembering would be
+ * relying on the thing that already went wrong once.
  *
- * If klip_outstanding switched to this endpoint for unfiltered questions and kept its own
- * calculation for filtered ones, the same question would be answered by two different
- * rule sets depending on whether a filter was set - and nothing in the response would say
- * so. Two tools, each stating whose arithmetic it reports, is the honest arrangement.
+ * We reported these filters as broken before finding the gate. Worth recording why: we
+ * tested scope with all / open / close / ytd - four values we invented - and concluded
+ * from their failure. Guessing a parameter's accepted values is not measuring it.
  *
  * WHAT IS DELIBERATELY NOT EXPOSED
  *
- * No plant, incoterm, status, supplier or product parameter. Accepting one that KLIP
- * discards would return company-wide figures labelled as one plant, which is the worst
- * failure this connector can produce: confidently wrong, with no error anywhere. A
- * parameter absent from the schema is a limitation the caller can see; a parameter that
- * silently does nothing is a lie.
+ * No contract-status filter. With scope=filtered it still leaves all four card counts
+ * unchanged, while plant, search and incoterms narrow correctly. Until KLIP explains
+ * that, offering it would be offering a filter that silently does nothing - and the
+ * figures are already split into open and closed, which covers the same question.
  *
  * Quantity units on this endpoint are unestablished, so nothing is converted.
  */
@@ -48,12 +48,20 @@ const inputShape = {
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
     .describe('Latest contract date to include.'),
-  transport_mode: z
+  transport_mode: z.string().min(1).optional().describe('Transport mode: LAND, SEA or MIX.'),
+  plant: z.string().min(1).optional().describe('Plant or group-plant exactly as klip_reference reports it.'),
+  supplier: z.string().min(1).optional().describe('Supplier name as klip_reference reports it.'),
+  product: z.string().min(1).optional().describe('Product name, e.g. "CPO".'),
+  incoterm: z
     .string()
     .min(1)
     .optional()
-    .describe('Transport mode: LAND, SEA or MIX. The only non-date filter this endpoint applies.'),
+    .describe('One incoterm, or several comma-separated, from klip_reference: FOB, FRC, LCO, CFR, CIF.'),
+  search: z.string().min(1).optional().describe('Free-text match across the contract fields KLIP searches.'),
 };
+
+/** Filters KLIP applies only when scope=filtered accompanies them. */
+const GATED = ['plant', 'supplier', 'product', 'incoterm', 'search'] as const;
 
 interface Cycle {
   count?: number;
@@ -84,13 +92,13 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
     'Contract delivery performance as KLIP itself computes it: contract counts, average and maximum ' +
       'days late, logistics and cash cycle times, outstanding quantity for open and closed contracts, ' +
       'and the distribution of lateness across buckets (on time, 1-7 days, 8-14, 15-30, 31-60, 61+). ' +
-      'These are the figures the KLIP Contract Performance page shows, aggregated over the whole ' +
-      'matching dataset rather than one page, so they are the ones to quote for a company total. ' +
-      'ONLY date range and transport mode narrow these figures - there is no plant, supplier, product, ' +
-      'status or incoterm filter, because KLIP ignores those on this endpoint. For a per-plant or ' +
-      'per-supplier breakdown use klip_outstanding, whose figures are computed by this connector and ' +
-      'may differ. QUANTITIES ARE UNCONVERTED: the unit is not confirmed, so do not describe them as ' +
-      'tonnes or kilograms.',
+      'Filterable by plant, supplier, product, incoterm, transport mode, free text and date range, all ' +
+      'applied by KLIP across the whole matching dataset rather than one page - so these are the ' +
+      'figures to quote for a total, and they reconcile against the KLIP Contract Performance page. ' +
+      'Resolve plant, supplier, product and incoterm wording with klip_reference first. There is no ' +
+      'contract-status filter here, but the figures are already split into open and closed. ' +
+      'QUANTITIES ARE UNCONVERTED: the unit is not confirmed, so do not describe them as tonnes or ' +
+      'kilograms.',
     'Returns one summary, not rows.',
   ),
   inputShape,
@@ -102,6 +110,17 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
     if (params.date_from !== undefined) upstream[route.params.dateFrom] = params.date_from;
     if (params.date_to !== undefined) upstream[route.params.dateTo] = params.date_to;
     if (params.transport_mode !== undefined) upstream[route.params.transportMode] = params.transport_mode;
+    if (params.plant !== undefined) upstream[route.params.plant] = params.plant;
+    if (params.supplier !== undefined) upstream[route.params.supplier] = params.supplier;
+    if (params.product !== undefined) upstream[route.params.product] = params.product;
+    if (params.incoterm !== undefined) upstream[route.params.incoterm] = params.incoterm;
+    if (params.search !== undefined) upstream[route.params.search] = params.search;
+
+    // The gate, derived rather than remembered. Any gated filter present means
+    // scope=filtered must accompany it, or KLIP answers the unfiltered YTD question and
+    // the caller gets company-wide figures under their own plant filter.
+    const gatedInUse = GATED.filter((k) => params[k] !== undefined);
+    if (gatedInUse.length > 0) upstream[route.params.scope] = 'filtered';
 
     const query = new URLSearchParams(upstream).toString();
     const path = query === '' ? route.path : `${route.path}?${query}`;
@@ -134,11 +153,12 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
         'from both tools in one total without saying which produced which.',
       filters_applied:
         Object.keys(upstream).length === 0
-          ? 'None. These are company-wide figures.'
-          : `Applied by KLIP: ${Object.keys(upstream).join(', ')}.`,
+          ? 'None. These are company-wide figures for the year to date.'
+          : `Applied by KLIP across the whole matching dataset: ${Object.keys(upstream).join(', ')}.`,
       filters_unavailable:
-        'KLIP ignores plant, incoterm, status, supplier and product on this endpoint, so they are not ' +
-        'offered here. A breakdown by those dimensions must come from klip_outstanding.',
+        'No contract-status filter: KLIP accepts one here but it does not narrow the result, so it is ' +
+        'not offered. The figures are already split into open and closed, which covers the same ' +
+        'question.',
       units_note:
         'Quantity figures are reported exactly as KLIP returns them. The unit is NOT confirmed and no ' +
         'conversion has been applied. Do not describe them as MT or kg.',
