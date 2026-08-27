@@ -20,4 +20,5 @@ export const PORTS = {
   coverageWarning: 5195,
   detailEnvelope: 5196,
   oilLoss: 5197,
+  vocabulary: 5198,
 } as const;

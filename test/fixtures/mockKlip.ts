@@ -462,6 +462,32 @@ export function createMockKlip(state: MockState): Express {
    * endpoint here: no `success` wrapper, no pagination, and top-level summary blocks
    * beside the rows. quantity_sent IS populated here, contrary to /trucking.
    */
+  /**
+   * Canonical filter vocabularies. Bare string arrays, no counts.
+   *
+   * Note what group-plants does: it reports ONE "TJ PURA" while the trucking location
+   * field distinguishes the Edible Oil and Biomass sites. That collapse is real in KLIP
+   * and is why the reference tool carries a caveat rather than presenting these as a
+   * site register.
+   *
+   * Note also that incoterms lists SIX values while the contract sample only ever
+   * produces three - the reason a canonical list is worth a round trip at all.
+   */
+  app.get('/api/contracts/filter-options/group-plants', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    res.json({ success: true, data: { groupPlants: ['Cisadane', 'Sei Mangkei', 'TJ PURA', 'Trading'] } });
+  });
+
+  app.get('/api/contracts/filter-options/incoterms', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    res.json({ success: true, data: { incoterms: ['Blank', 'CFR', 'CIF', 'FOB', 'FRC', 'LCO'] } });
+  });
+
+  app.get('/api/contracts/filter-options/b2b-flags', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    res.json({ success: true, data: { b2bFlags: ['B2B', 'DIRECT'] } });
+  });
+
   app.get('/api/oil-loss', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json({

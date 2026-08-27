@@ -7,11 +7,19 @@
  * reads as "nothing is outstanding there". A confidently wrong empty result is
  * worse than an error, and it defeats both U1 (ask, don't guess) and M1.
  *
- * The tool derives its vocabulary from the contract population rather than a
- * dedicated KLIP endpoint, so it needs no KLIP feature work. Results are cached.
+ * Two sources, and the difference is reported rather than blurred.
+ *
+ * CANONICAL - KLIP's own filter-option endpoints, the same lists its UI uses. These are
+ * the complete domain. Only three exist: group-plants, incoterms, b2b-flags.
+ *
+ * SAMPLED - products, suppliers and statuses have no such endpoint (404), so they are
+ * still tallied from contract rows. A sample proves what EXISTS, never what the full
+ * domain is, and saying so matters: the incoterm sample only ever produced FOB, FRC and
+ * LCO, while the canonical list has six values including CFR and Blank. Reporting a
+ * 1,000-row sample as the vocabulary understated it by a third.
  */
 import { z } from 'zod';
-import { walk } from './../../adapters/klip/paginate.js';
+import { fetchOne, walk } from './../../adapters/klip/paginate.js';
 import { routes, enums } from './../../adapters/klip/routes.js';
 import { fields, pickString, type Row } from './../../adapters/klip/fields.js';
 import * as cache from './../../core/cache.js';
@@ -61,6 +69,18 @@ export const reference: ToolDefinition<typeof inputShape> = {
 
   async handler(params): Promise<ToolOutcome> {
     const route = routes.contracts;
+    const wants = (facet: string): boolean => params.facet === 'all' || params.facet === facet;
+
+    // Canonical lists first. They are cheap, complete, and make the sampled facets'
+    // limitations obvious by contrast.
+    const canonical = await cache.through(cache.keyFor('klip_reference_canonical', {}), async () => {
+      const [plants, incoterms, b2b] = await Promise.all([
+        fetchOne<string[]>(routes.filterOptionsGroupPlants.path, routes.filterOptionsGroupPlants.rowsPath),
+        fetchOne<string[]>(routes.filterOptionsIncoterms.path, routes.filterOptionsIncoterms.rowsPath),
+        fetchOne<string[]>(routes.filterOptionsB2bFlags.path, routes.filterOptionsB2bFlags.rowsPath),
+      ]);
+      return { plants, incoterms, b2b };
+    });
 
     const cached = await cache.through(cache.keyFor('klip_reference', { facet: 'all' }), async () =>
       walk<Row>({ route, filters: {} }),
@@ -68,17 +88,67 @@ export const reference: ToolDefinition<typeof inputShape> = {
     const walked = cached.value;
     const rows = walked.rows;
 
-    const wants = (facet: string): boolean => params.facet === 'all' || params.facet === facet;
+    const data: Record<string, unknown> = {};
 
-    const data: Record<string, unknown> = {
-      derived_from: 'the contract population currently visible to the read-only service account',
-    };
-    if (wants('plants')) data.plants = tally(rows, fields.contract.plant);
-    if (wants('products')) data.products = tally(rows, fields.contract.product);
-    if (wants('suppliers')) data.suppliers = tally(rows, fields.contract.supplier);
-    if (wants('statuses')) data.statuses = tally(rows, fields.contract.status);
+    const canonicalPlants = canonical.value.plants;
+    if (wants('plants')) {
+      if (Array.isArray(canonicalPlants)) {
+        data.plants = canonicalPlants.map((value) => ({ value }));
+        data.plants_source = 'canonical: KLIP filter-options/group-plants, the complete set';
+        data.plants_caveat =
+          'These are CONTRACT group-plant values and are not a site register. KLIP reports one ' +
+          '"TJ PURA" here, while trucking distinguishes "EUP EDIBLE OIL TJ.PURA" from ' +
+          '"EUP BIOMASS TJ.PURA". Do not treat a single group-plant as a single physical site.';
+      } else {
+        data.plants = tally(rows, fields.contract.plant);
+        data.plants_source = 'sampled from contract rows: the canonical list could not be read';
+      }
+    }
+
+    // No filter-option endpoint exists for these three, so they stay samples and say so.
+    if (wants('products')) {
+      data.products = tally(rows, fields.contract.product);
+      data.products_source = 'sampled from contract rows: KLIP exposes no products filter-option endpoint';
+    }
+    if (wants('suppliers')) {
+      data.suppliers = tally(rows, fields.contract.supplier);
+      data.suppliers_source = 'sampled from contract rows: KLIP exposes no suppliers filter-option endpoint';
+    }
+    if (wants('statuses')) {
+      data.statuses = tally(rows, fields.contract.status);
+      data.statuses_source = 'sampled from contract rows: KLIP exposes no statuses filter-option endpoint';
+      data.statuses_caveat =
+        'The contract DETAIL endpoint returns values outside this set - "ACTIVE" where the list ' +
+        'reports "Open". Raised with the KLIP team; prefer the list vocabulary when filtering.';
+    }
+
     if (wants('incoterms')) {
-      data.incoterms = tally(rows, fields.contract.incoterm);
+      const canonicalIncoterms = canonical.value.incoterms;
+      if (Array.isArray(canonicalIncoterms)) {
+        const seen = new Set(
+          tally(rows, fields.contract.incoterm).map((v) => v.value.trim().toLowerCase()),
+        );
+        const known = new Set<string>([
+          ...enums.shippedBasisIncoterms,
+          ...enums.receivedBasisIncoterms,
+        ]);
+        const unclassified = canonicalIncoterms.filter((v) => !known.has(v.trim().toLowerCase()));
+        data.incoterms = canonicalIncoterms.map((value) => ({
+          value,
+          seen_in_sample: seen.has(value.trim().toLowerCase()),
+        }));
+        data.incoterms_source = 'canonical: KLIP filter-options/incoterms, the complete set';
+        if (unclassified.length > 0) {
+          data.incoterms_unclassified = unclassified;
+          data.incoterms_unclassified_note =
+            `These incoterms exist in KLIP but this connector has no outstanding basis for them: ` +
+            `${unclassified.join(', ')}. Contracts using them are EXCLUDED from outstanding totals and ` +
+            'flagged, never assumed onto a basis. Classification has been requested from the KLIP team.';
+        }
+      } else {
+        data.incoterms = tally(rows, fields.contract.incoterm);
+        data.incoterms_source = 'sampled from contract rows: the canonical list could not be read';
+      }
       data.incoterm_outstanding_basis = {
         shipped_basis: enums.shippedBasisIncoterms,
         received_basis: enums.receivedBasisIncoterms,
@@ -88,8 +158,13 @@ export const reference: ToolDefinition<typeof inputShape> = {
       };
     }
 
+    if (Array.isArray(canonical.value.b2b)) {
+      data.b2b_flags = canonical.value.b2b.map((value) => ({ value }));
+      data.b2b_flags_source = 'canonical: KLIP filter-options/b2b-flags';
+    }
+
     if (walked.truncated) {
-      data.completeness_warning =
+      data.sampled_facets_completeness_warning =
         'The contract fetch hit its page bound, so this vocabulary may be missing values that appear only in ' +
         'contracts beyond the bound. Treat a near-miss on a user\'s wording as worth asking about.';
     }

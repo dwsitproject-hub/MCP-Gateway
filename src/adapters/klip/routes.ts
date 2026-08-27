@@ -246,6 +246,68 @@ export const routes = {
    *
    * `dataSources` names the provenance of each quantity, which no other endpoint offers.
    */
+  /**
+   * Canonical filter vocabularies - the same lists KLIP's own filter UI uses. Probed
+   * 27 Aug 2026. Only THREE exist: group-plants, incoterms and b2b-flags. The obvious
+   * siblings (/products, /suppliers, /statuses) return 404, so those vocabularies still
+   * have to be sampled from contract rows and reported as samples.
+   *
+   * Envelope is { success, data: { <key>: [...] } } - a bare string array, no counts.
+   *
+   * WORTH KNOWING: group-plants collapses the two TJ.PURA sites into one "TJ PURA",
+   * which is the merge KLIP warned us not to make. /trucking's location field
+   * distinguishes "EUP EDIBLE OIL TJ.PURA" from "EUP BIOMASS TJ.PURA". So the canonical
+   * list is canonical for CONTRACT filtering and is NOT a plant register.
+   */
+  filterOptionsGroupPlants: {
+    path: '/contracts/filter-options/group-plants',
+    params: {},
+    rowsPath: 'data.groupPlants',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'none',
+    dateFormat: 'unknown' as const,
+    authMiddleware: 'bearerAuth',
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging',
+    verifiedOn: '2026-08-27',
+    notes: '14 values, names not codes: Bekasi, Bontang, Bulking Batam ... Cisadane, TJ BUTON, TJ PURA, Trading.',
+  },
+
+  filterOptionsIncoterms: {
+    path: '/contracts/filter-options/incoterms',
+    params: {},
+    rowsPath: 'data.incoterms',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'none',
+    dateFormat: 'unknown' as const,
+    authMiddleware: 'bearerAuth',
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging',
+    verifiedOn: '2026-08-27',
+    notes:
+      'SIX values: Blank, CFR, CIF, FOB, FRC, LCO. A 200-row contract sample only ever showed ' +
+      'FOB/FRC/LCO, so sampling understated the domain - exactly why the canonical list matters. ' +
+      'CFR and Blank are NOT classified by our outstanding-basis rules, so those contracts are ' +
+      'currently excluded from outstanding totals as unknown_incoterm. Classification queried with KLIP.',
+  },
+
+  filterOptionsB2bFlags: {
+    path: '/contracts/filter-options/b2b-flags',
+    params: {},
+    rowsPath: 'data.b2bFlags',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'none',
+    dateFormat: 'unknown' as const,
+    authMiddleware: 'bearerAuth',
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging',
+    verifiedOn: '2026-08-27',
+    notes: 'Two values: B2B, DIRECT.',
+  },
+
   oilLoss: {
     path: '/oil-loss',
     // No pagination parameters are advertised. Sending page/limit would imply a control
