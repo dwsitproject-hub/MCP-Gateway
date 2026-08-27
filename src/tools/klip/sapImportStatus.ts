@@ -80,6 +80,9 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
       data: {
         imports,
         latest: imports[0] ?? null,
+        // truncated now reports COVERAGE only; the display bound is stated here instead.
+        rows_shown: imports.length,
+        matching_rows: walked.rows.length,
         // A completed import cannot have finished in the future. Surfacing this beats
         // reporting the timestamp straight, and beats silently adjusting it.
         clock_warning: imports.some((i) => isImplausiblyFuture(i.started_at))
@@ -95,7 +98,13 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
       },
       units: null,
       rowCount: imports.length,
-      truncated: walked.truncated || walked.rows.length > limit,
+      // TRUNCATED MEANS COVERAGE, NOT DISPLAY (review KLIP-008).
+      // This used to also fire when more rows were FETCHED than shown, which is a
+      // different fact: the aggregates are then complete and only the row list is
+      // shortened. Reporting that as truncated attached "the figures cover only part
+      // of the matching data" to results with 235 of 235 rows - and a warning that
+      // cries wolf on complete results is one people stop reading on partial ones.
+      truncated: walked.truncated,
       asOf: cached.fetchedAt,
       fromCache: cached.fromCache,
       coverage: {

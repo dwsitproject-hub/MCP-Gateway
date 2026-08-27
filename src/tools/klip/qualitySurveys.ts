@@ -92,6 +92,10 @@ export const qualitySurveys: ToolDefinition<typeof inputShape> = {
         'FFA and M&I are percentages; IV (iodine value) and DOBI are dimensionless index values. ' +
         'A null means the measurement is not recorded in KLIP for that survey, not that it is zero.',
     };
+    // truncated now reports COVERAGE only, so the display bound has to be stated here
+    // or the caller cannot tell a shortened list from a complete one.
+    data.rows_shown = surveys.length;
+    data.matching_rows = walked.fetchedRows;
     const note = localFilterNote(filters.local);
     if (note !== undefined) data.local_filter_note = note;
     if (surveys.length === 0) {
@@ -103,7 +107,13 @@ export const qualitySurveys: ToolDefinition<typeof inputShape> = {
       data,
       units: null,
       rowCount: surveys.length,
-      truncated: walked.truncated || rows.length > CAP,
+      // TRUNCATED MEANS COVERAGE, NOT DISPLAY (review KLIP-008).
+      // This used to also fire when more rows were FETCHED than shown, which is a
+      // different fact: the aggregates are then complete and only the row list is
+      // shortened. Reporting that as truncated attached "the figures cover only part
+      // of the matching data" to results with 235 of 235 rows - and a warning that
+      // cries wolf on complete results is one people stop reading on partial ones.
+      truncated: walked.truncated,
       asOf: cached.fetchedAt,
       fromCache: cached.fromCache,
       coverage: {

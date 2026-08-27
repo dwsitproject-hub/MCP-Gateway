@@ -149,7 +149,13 @@ export const paymentStatus: ToolDefinition<typeof inputShape> = {
       data,
       units: null,
       rowCount: Math.min(rows.length, limit),
-      truncated: walked.truncated || rows.length > limit,
+      // TRUNCATED MEANS COVERAGE, NOT DISPLAY (review KLIP-008).
+      // This used to also fire when more rows were FETCHED than shown, which is a
+      // different fact: the aggregates are then complete and only the row list is
+      // shortened. Reporting that as truncated attached "the figures cover only part
+      // of the matching data" to results with 235 of 235 rows - and a warning that
+      // cries wolf on complete results is one people stop reading on partial ones.
+      truncated: walked.truncated,
       asOf: cached.fetchedAt,
       fromCache: cached.fromCache,
       coverage: {
