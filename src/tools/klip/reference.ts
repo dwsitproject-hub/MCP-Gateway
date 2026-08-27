@@ -125,19 +125,47 @@ export const reference: ToolDefinition<typeof inputShape> = {
     if (wants('incoterms')) {
       const canonicalIncoterms = canonical.value.incoterms;
       if (Array.isArray(canonicalIncoterms)) {
-        const seen = new Set(
-          tally(rows, fields.contract.incoterm).map((v) => v.value.trim().toLowerCase()),
-        );
+        const sampled = tally(rows, fields.contract.incoterm);
+        const seen = new Set(sampled.map((v) => v.value.trim().toLowerCase()));
+        const canonicalKeys = new Set(canonicalIncoterms.map((v) => v.trim().toLowerCase()));
         const known = new Set<string>([
           ...enums.shippedBasisIncoterms,
           ...enums.receivedBasisIncoterms,
         ]);
-        const unclassified = canonicalIncoterms.filter((v) => !known.has(v.trim().toLowerCase()));
-        data.incoterms = canonicalIncoterms.map((value) => ({
-          value,
-          seen_in_sample: seen.has(value.trim().toLowerCase()),
-        }));
-        data.incoterms_source = 'canonical: KLIP filter-options/incoterms, the complete set';
+
+        /**
+         * The union, not either list alone.
+         *
+         * The canonical list alone hides a value that appears on real rows but is not in
+         * it - and a user asking about that contract would be told the incoterm does not
+         * exist, which is the failure this tool was built to prevent. The sample alone
+         * understates the domain. Reporting both, each labelled, is the only version that
+         * cannot mislead in either direction.
+         */
+        const extras = sampled
+          .map((v) => v.value)
+          .filter((v) => !canonicalKeys.has(v.trim().toLowerCase()));
+
+        data.incoterms = [
+          ...canonicalIncoterms.map((value) => ({
+            value,
+            in_canonical_list: true,
+            seen_in_sample: seen.has(value.trim().toLowerCase()),
+          })),
+          ...extras.map((value) => ({ value, in_canonical_list: false, seen_in_sample: true })),
+        ];
+        data.incoterms_source =
+          'canonical: KLIP filter-options/incoterms, plus any value found on contract rows but absent from it';
+        if (extras.length > 0) {
+          data.incoterms_outside_canonical = extras;
+          data.incoterms_outside_canonical_note =
+            `These appear on contract rows but not in KLIP's canonical list: ${extras.join(', ')}. ` +
+            'Usable as filter values because the data contains them, but worth raising with KLIP - ' +
+            'either the list is incomplete or those rows carry a value KLIP no longer recognises.';
+        }
+        const unclassified = [...canonicalIncoterms, ...extras].filter(
+          (v) => !known.has(v.trim().toLowerCase()),
+        );
         if (unclassified.length > 0) {
           data.incoterms_unclassified = unclassified;
           data.incoterms_unclassified_note =

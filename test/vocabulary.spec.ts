@@ -40,9 +40,29 @@ afterAll(async () => {
 describe('canonical vocabularies', () => {
   it('reports every incoterm KLIP has, not only those the sample happened to contain', async () => {
     const out = await reference.handler({ facet: 'incoterms' } as never, ctx);
-    const data = out.data as { incoterms: Array<{ value: string; seen_in_sample: boolean }>; incoterms_source: string };
-    expect(data.incoterms.map((i) => i.value)).toEqual(['Blank', 'CFR', 'CIF', 'FOB', 'FRC', 'LCO']);
+    const data = out.data as {
+      incoterms: Array<{ value: string; in_canonical_list: boolean; seen_in_sample: boolean }>;
+      incoterms_source: string;
+    };
+    const canonical = data.incoterms.filter((i) => i.in_canonical_list).map((i) => i.value);
+    expect(canonical).toEqual(['Blank', 'CFR', 'CIF', 'FOB', 'FRC', 'LCO']);
     expect(data.incoterms_source).toMatch(/canonical/i);
+  });
+
+  it('also reports a value found on rows but absent from the canonical list', async () => {
+    // The fixture holds a contract with incoterm DAP, which KLIP's list omits. Reporting
+    // only the canonical list would tell a user that contract's incoterm does not exist -
+    // the exact failure this tool was built to prevent, in the opposite direction.
+    const out = await reference.handler({ facet: 'incoterms' } as never, ctx);
+    const data = out.data as {
+      incoterms: Array<{ value: string; in_canonical_list: boolean }>;
+      incoterms_outside_canonical?: string[];
+      incoterms_outside_canonical_note?: string;
+    };
+    expect(data.incoterms.map((i) => i.value)).toContain('DAP');
+    expect(data.incoterms.find((i) => i.value === 'DAP')?.in_canonical_list).toBe(false);
+    expect(data.incoterms_outside_canonical).toContain('DAP');
+    expect(String(data.incoterms_outside_canonical_note)).toMatch(/worth raising with KLIP/i);
   });
 
   it('marks which values the contract sample actually contained', async () => {

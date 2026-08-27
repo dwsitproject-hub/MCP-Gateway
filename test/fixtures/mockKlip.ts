@@ -475,7 +475,14 @@ export function createMockKlip(state: MockState): Express {
    */
   app.get('/api/contracts/filter-options/group-plants', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
-    res.json({ success: true, data: { groupPlants: ['Cisadane', 'Sei Mangkei', 'TJ PURA', 'Trading'] } });
+    // Must be a SUPERSET of the plant values the contract fixture uses, as it is in
+    // KLIP: a canonical list that omits values appearing on real rows is incoherent, and
+    // would have the tool tell a user a plant does not exist while returning its
+    // contracts. "TJ PURA" is included to exercise the collapsed-site caveat.
+    res.json({
+      success: true,
+      data: { groupPlants: [...PLANTS, 'TJ PURA', 'Trading'] },
+    });
   });
 
   app.get('/api/contracts/filter-options/incoterms', (req: Request, res: Response) => {
