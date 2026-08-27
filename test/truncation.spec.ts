@@ -124,16 +124,28 @@ describe('bounded fetch reporting', () => {
 
 describe('the next_step must not contradict the payload', () => {
   it('does not tell the caller the TOTAL is partial when only the row sample is', async () => {
-    // The default hint reads truncated as "the figures cover only part of the matching
-    // data ... do not quote any total". Since the total comes from KLIP's server-side
-    // aggregate that is false, and it contradicted row_sample_warning in the same
-    // payload - the cry-wolf failure KLIP-008 was about, reintroduced by our own change.
+    // Asserted on the ENVELOPE, not the tool's return value. The first version of this
+    // test checked outcome.nextStep and passed for two commits while the wire output
+    // still carried the wrong hint - the runner was not copying the field through.
+    // A test one layer above the bug proves nothing about the bug.
+    const { wrap } = await import('../src/mcp/envelope.js');
     const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
     expect(outcome.truncated).toBe(true);
-    expect(outcome.nextStep).toBeTypeOf('string');
-    expect(String(outcome.nextStep)).toMatch(/TOTAL above is complete/i);
-    expect(String(outcome.nextStep)).not.toMatch(/cover only part/i);
-    expect(String(outcome.nextStep)).toMatch(/do not add up the listed rows/i);
+    const env = wrap(
+      {
+        tool: 'klip_outstanding',
+        units: outcome.units,
+        rowCount: outcome.rowCount,
+        truncated: outcome.truncated,
+        asOf: outcome.asOf,
+        coverage: outcome.coverage,
+        nextStep: outcome.nextStep,
+      },
+      outcome.data,
+    ) as { next_step?: string };
+    expect(String(env.next_step)).toMatch(/TOTAL above is complete/i);
+    expect(String(env.next_step)).not.toMatch(/cover only part/i);
+    expect(String(env.next_step)).toMatch(/do not add up the listed rows/i);
   });
 
   it('leaves the default hint alone for tools whose figures really are partial', async () => {

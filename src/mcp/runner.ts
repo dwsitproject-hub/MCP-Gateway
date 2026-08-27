@@ -49,6 +49,10 @@ export async function runTool(
         ...(outcome.fromCache === undefined ? {} : { fromCache: outcome.fromCache }),
         coverage: outcome.coverage,
         dataQuality: outcome.dataQuality,
+        // Carried through, or the envelope keeps its default hint and contradicts the
+        // tool's own payload. The override existed for two commits without reaching the
+        // wire because this line was missing.
+        nextStep: outcome.nextStep,
       },
       outcome.data,
     );
