@@ -125,8 +125,20 @@ export const fields = {
     plant: ['location', 'loading_location', 'plant', 'plantName'],
     sentDate: ['trucking_start_date', 'realization_start_date', 'sentDate', 'sent_date'],
     deliveredDate: ['trucking_completion_date', 'realization_end_date', 'deliveredDate', 'delivered_date'],
-    qtySent: ['quantity_sent', 'qtySent', 'qty_sent'],
-    qtyDelivered: ['quantity_delivered', 'qtyDelivered', 'qty_delivered'],
+    /**
+      * KLIP's vocabulary, adopted verbatim rather than mapped onto ours (KLIP-004):
+      *   quantity_delivered = DISPATCHED from origin
+      *   quantity_receive   = RECEIVED, weighed in at destination
+      *
+      * quantity_sent is empty in every row - 0 of 6,766 - and the SAP fallback matches
+      * nothing, so there is no sent weight on this endpoint. It is deliberately NOT
+      * mapped onto dispatched: a null is visibly missing, a mislabelled number is not.
+      * (/oil-loss does carry a populated quantity_sent; provenance is with KLIP.)
+      *
+      * Values are KILOGRAMS here, unlike contracts which carry unit="MT" per row.
+      */
+    dispatched: ['quantity_delivered', 'quantity_delivery', 'qtyDelivered'],
+    received: ['quantity_receive', 'quantity_received', 'qtyReceived'],
     /**
       * NOT PRESENT on live rows. /trucking returns OPERATIONS, not individual truck
       * movements, so there is no plate number to report. Left in place so the reader

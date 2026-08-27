@@ -65,8 +65,11 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
     }
 
     const mapped = rows.map((row) => {
-      const sent = pickNumber(row, fields.trucking.qtySent);
-      const delivered = pickNumber(row, fields.trucking.qtyDelivered);
+      // KLIP's own terms. `sent` no longer exists as a concept on this endpoint: the
+      // column is empty in every row, so reporting a proxy under that name would be a
+      // wrong label rather than a missing value.
+      const dispatched = pickNumber(row, fields.trucking.dispatched);
+      const received = pickNumber(row, fields.trucking.received);
       return {
         sequence: pickString(row, fields.trucking.sequence),
         contract_id: pickString(row, fields.trucking.contractId),
@@ -74,9 +77,10 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
         truck_number: pickString(row, fields.trucking.truckNumber),
         sent_date: toDateOnly(pickString(row, fields.trucking.sentDate)),
         delivered_date: toDateOnly(pickString(row, fields.trucking.deliveredDate)),
-        sent_kg: sent,
-        delivered_kg: delivered,
-        gain_loss_kg: gainLossKg(sent, delivered),
+        dispatched_kg: dispatched,
+        received_kg: received,
+        // Gain or loss in transit: what arrived minus what left.
+        gain_loss_kg: gainLossKg(dispatched, received),
       };
     });
 
@@ -87,8 +91,8 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
     const data: Record<string, unknown> = {
       [totalsKey]: {
         sequences: mapped.length,
-        qty_sent_mt: kgToMt(sumKg(mapped.map((m) => m.sent_kg))),
-        qty_delivered_mt: kgToMt(sumKg(mapped.map((m) => m.delivered_kg))),
+        dispatched_mt: kgToMt(sumKg(mapped.map((m) => m.dispatched_kg))),
+        received_mt: kgToMt(sumKg(mapped.map((m) => m.received_kg))),
         gain_loss_mt: kgToMt(gainLossTotalKg),
         excluded_incomplete_weights: incomplete,
       },
@@ -99,8 +103,8 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
         truck_number: m.truck_number,
         sent_date: m.sent_date,
         delivered_date: m.delivered_date,
-        qty_sent_mt: kgToMt(m.sent_kg),
-        qty_delivered_mt: kgToMt(m.delivered_kg),
+        dispatched_mt: kgToMt(m.dispatched_kg),
+        received_mt: kgToMt(m.received_kg),
         gain_loss_mt: kgToMt(m.gain_loss_kg),
       })),
       rows_shown: Math.min(mapped.length, limit),
@@ -112,7 +116,9 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
         'read. Ask the user to narrow by plant or date range before quoting a gain/loss figure.';
     }
     if (incomplete > 0) {
-      data.exclusions_note = `${incomplete} sequences have a missing sent or delivered weight and are excluded from gain_loss_mt.`;
+      data.exclusions_note =
+        `${incomplete} sequences are missing a dispatched or received weight and are excluded from ` +
+        'gain_loss_mt. Their gain/loss is unknown, not zero.';
     }
     const note = localFilterNote(filters.local);
     if (note !== undefined) data.local_filter_note = note;

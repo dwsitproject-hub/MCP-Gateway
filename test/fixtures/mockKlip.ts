@@ -391,10 +391,20 @@ export function createMockKlip(state: MockState): Express {
       nested(
         'truckingOperations',
         [
-          { id: 'TRK-1', sequence: '1', contractId, plant_site: 'TJP', truckNumber: 'BK 1234 XY',
-            sentDate: '2026-08-01', deliveredDate: '2026-08-01', qtySent: 30_000, qtyDelivered: 29_850 },
-          { id: 'TRK-2', sequence: '2', contractId, plant_site: 'TJP', truckNumber: 'BK 5678 ZA',
-            sentDate: '2026-08-02', deliveredDate: null, qtySent: 30_000, qtyDelivered: null },
+          // KLIP's real spellings and vocabulary. quantity_sent is null on BOTH rows,
+          // matching production - 0 of 6,766 trucking rows carry a sent weight - so a
+          // fixture that populated it would let a proxy-for-sent bug pass unnoticed.
+          // Kilograms here, unlike contracts.
+          {
+            id: 'TRK-1', operation_id: 'OP-1', contract_id: contractId, location: 'TJP',
+            trucking_start_date: '2026-08-01', trucking_completion_date: '2026-08-01',
+            quantity_sent: null, quantity_delivered: 30_000, quantity_receive: 29_850,
+          },
+          {
+            id: 'TRK-2', operation_id: 'OP-2', contract_id: contractId, location: 'TJP',
+            trucking_start_date: '2026-08-02', trucking_completion_date: null,
+            quantity_sent: null, quantity_delivered: 30_000, quantity_receive: null,
+          },
         ],
         req,
         { total: 2, status: { unplanned: 0, inProgress: 1, completed: 1, cancelled: 0 } },

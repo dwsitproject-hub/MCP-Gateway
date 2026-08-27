@@ -146,16 +146,18 @@ export const getContract: ToolDefinition<typeof inputShape> = {
     }));
 
     const trucking = truckingRows.slice(0, LINKED_CAP).map((row) => {
-      const sent = pickNumber(row, fields.trucking.qtySent);
-      const delivered = pickNumber(row, fields.trucking.qtyDelivered);
+      // KLIP's vocabulary (KLIP-004): delivered = dispatched from origin,
+      // receive = weighed in at destination. Kilograms on this endpoint.
+      const dispatched = pickNumber(row, fields.trucking.dispatched);
+      const received = pickNumber(row, fields.trucking.received);
       return {
         sequence: pickString(row, fields.trucking.sequence),
         truck_number: pickString(row, fields.trucking.truckNumber),
         sent_date: toDateOnly(pickString(row, fields.trucking.sentDate)),
         delivered_date: toDateOnly(pickString(row, fields.trucking.deliveredDate)),
-        qty_sent_mt: kgToMt(sent),
-        qty_delivered_mt: kgToMt(delivered),
-        gain_loss_mt: kgToMt(gainLossKg(sent, delivered)),
+        dispatched_mt: kgToMt(dispatched),
+        received_mt: kgToMt(received),
+        gain_loss_mt: kgToMt(gainLossKg(dispatched, received)),
       };
     });
 

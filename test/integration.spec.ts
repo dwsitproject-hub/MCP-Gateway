@@ -280,12 +280,29 @@ describe('unit discipline', () => {
     expect(shipments[0]?.qty_mt).toBe(3500); // 3,500,000 kg
   });
 
-  it('computes trucking gain/loss and excludes a sequence with a missing weight', async () => {
+  it('computes trucking gain/loss from dispatched versus received, in KLIP terms', async () => {
     const { outcome } = await run('klip_trucking_ops', { contract_id: '4700010001' });
     const data = outcome.data as Record<string, unknown>;
-    const totals = (data.totals ?? data.totals_partial) as { gain_loss_mt: number | null; excluded_incomplete_weights: number };
-    expect(totals.gain_loss_mt).toBe(-0.15); // -150 kg
+    const totals = (data.totals ?? data.totals_partial) as {
+      dispatched_mt: number | null;
+      received_mt: number | null;
+      gain_loss_mt: number | null;
+      excluded_incomplete_weights: number;
+    };
+    // 30,000 kg dispatched, 29,850 received: a 150 kg loss in transit.
+    expect(totals.gain_loss_mt).toBe(-0.15);
     expect(totals.excluded_incomplete_weights).toBe(1);
+  });
+
+  it('does not report a sent weight, because KLIP has none on this endpoint', async () => {
+    // quantity_sent is empty in every production row. KLIP proposed mapping the
+    // dispatched figure onto qty_sent_mt; a mislabelled number is worse than a null,
+    // because a null is visibly missing and a wrong label is not.
+    const { outcome } = await run('klip_trucking_ops', { contract_id: '4700010001' });
+    const json = JSON.stringify(outcome.data);
+    expect(json).not.toContain('qty_sent_mt');
+    expect(json).toContain('dispatched_mt');
+    expect(json).toContain('received_mt');
   });
 });
 
