@@ -51,12 +51,19 @@ describe('bounded fetch reporting', () => {
 
   it('reports coverage honestly: rows read versus rows that exist', async () => {
     const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    // Derived from the fixture rather than hardcoded: the point under test is that
+    // fetched_rows and total_rows describe DIFFERENT populations when the fetch is
+    // bounded, not that either equals a particular number. A literal here breaks
+    // whenever a case is added to the fixture, which teaches people to edit the
+    // expectation rather than read it.
+    const all = state.contracts.length;
     expect(outcome.coverage).toEqual({
       fetched_rows: 100,
-      total_rows: 254,
+      total_rows: all,
       pages_fetched: 1,
-      total_pages: 3,
+      total_pages: Math.ceil(all / 100),
     });
+    expect(outcome.coverage?.fetched_rows).toBeLessThan(all);
   });
 
   it('klip_search_contracts applies the same rule', async () => {

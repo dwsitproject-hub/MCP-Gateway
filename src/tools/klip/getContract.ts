@@ -9,7 +9,7 @@
  *     in the payload rather than silently rendered as an empty list.
  */
 import { z } from 'zod';
-import { fetchOne, walk } from './../../adapters/klip/paginate.js';
+import { dig, fetchEnvelope, walk } from './../../adapters/klip/paginate.js';
 import { routes } from './../../adapters/klip/routes.js';
 import { fields, pickNumber, pickString, type Row } from './../../adapters/klip/fields.js';
 import {
@@ -52,8 +52,9 @@ async function linked(
   const param = (route.params as { contractId?: string }).contractId;
   if (param === undefined) {
     failures.push(
-      `${label}: KLIP exposes no contract filter on this endpoint, so linked ${label} cannot be listed here ` +
-        `(Appendix A - probed 2026-08-21). Query the ${label} tool directly.`,
+      `${label}: this connector has no contract filter configured for that endpoint, so linked ${label} ` +
+        `are not listed here. Query the ${label} tool directly. This is a connector limitation, not a ` +
+        `statement that none exist.`,
     );
     return [];
   }
@@ -90,18 +91,46 @@ export const getContract: ToolDefinition<typeof inputShape> = {
     const id = params.contract_id;
     const asOf = new Date();
 
-    const header = await fetchOne<Row>(`${routes.contractById.path.replace(':id', encodeURIComponent(id))}`, calls);
+    // Fetch the whole envelope once: /contracts/:id carries the record, its linked
+    // shipments and payments, and the match metadata, all in one response.
+    const envelope = await fetchEnvelope(
+      `${routes.contractById.path.replace(':id', encodeURIComponent(id))}`,
+      calls,
+    );
+    if (envelope === undefined) throw notFound(`Contract "${id}"`);
+
+    const header = dig(envelope, routes.contractById.rowsPath) as Row | undefined;
     if (header === undefined || Object.keys(header).length === 0) {
       throw notFound(`Contract "${id}"`);
     }
 
+    /**
+     * A PO number can span several contracts under multi-STO. KLIP resolves one
+     * deterministically - exact contract number first, then newest - so a match_count
+     * above 1 means the record below is ONE OF SEVERAL. Presenting it as the answer
+     * would be a quiet lie about a lookup the user believes was exact.
+     */
+    const matchCount = dig(envelope, 'data.match_count');
+    const matchedBy = dig(envelope, 'data.matched_by');
+    const ambiguous = typeof matchCount === 'number' && matchCount > 1;
+
     const line = outstandingFor(toContractLine(header));
 
-    const [shipmentRows, truckingRows, paymentRows] = await Promise.all([
-      linked('shipments', id, routes.shipments, calls, failures),
+    // Shipments and payments arrive INLINE. Only trucking needs its own call.
+    const inlineShipments = dig(envelope, 'data.shipments');
+    const inlinePayments = dig(envelope, 'data.payments');
+
+    const [linkedShipments, truckingRows, linkedPayments] = await Promise.all([
+      Array.isArray(inlineShipments)
+        ? Promise.resolve(inlineShipments as Row[])
+        : linked('shipments', id, routes.shipments, calls, failures),
       linked('trucking', id, routes.trucking, calls, failures),
-      linked('payments', id, routes.payments, calls, failures),
+      Array.isArray(inlinePayments)
+        ? Promise.resolve(inlinePayments as Row[])
+        : linked('payments', id, routes.payments, calls, failures),
     ]);
+    const shipmentRows = linkedShipments;
+    const paymentRows = linkedPayments;
 
     const shipments = shipmentRows.slice(0, LINKED_CAP).map((row) => ({
       sto_number: pickString(row, fields.shipment.stoNumber),
@@ -169,6 +198,15 @@ export const getContract: ToolDefinition<typeof inputShape> = {
       payments,
       quantities_note: 'Payment amounts are currency values and are NOT converted; only quantities are in MT.',
     };
+
+    if (ambiguous) {
+      data.match_warning =
+        `The identifier "${id}" matched ${String(matchCount)} contracts in KLIP. The record above is the one ` +
+        'KLIP resolved (exact contract number first, then newest), NOT the only match. Report it as one of ' +
+        'several and ask the user which contract they mean before quoting its figures.';
+    }
+    if (typeof matchedBy === 'string') data.matched_by = matchedBy;
+    if (typeof matchCount === 'number') data.match_count = matchCount;
 
     if (failures.length > 0) {
       data.incomplete_sections = failures;

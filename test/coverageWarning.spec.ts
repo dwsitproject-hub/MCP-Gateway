@@ -16,8 +16,9 @@
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { freshState, startMockKlip, type MockState } from './fixtures/mockKlip.js';
+import { PORTS } from './fixtures/ports.js';
 
-const PORT = 5191;
+const PORT = PORTS.coverageWarning;
 
 process.env.KLIP_BASE_URL = `http://127.0.0.1:${PORT}/api`;
 process.env.KLIP_MAX_PAGES = '50';   // never bound: coverage is always complete

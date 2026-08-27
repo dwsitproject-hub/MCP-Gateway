@@ -122,14 +122,25 @@ export const routes = {
   contractById: {
     path: '/contracts/:id',
     params: {},
-    rowsPath: 'data',
+    // The record is NESTED. The envelope is
+    //   data: { contract, shipments, payments, matched_by, match_count }
+    // which is a different shape from the list endpoint's data.contracts[]. Reading
+    // `data` here returned the wrapper and resolved every field to null against a
+    // populated record - see fetchOne.
+    rowsPath: 'data.contract',
     totalPagesPath: '',
     maxLimit: 0,
     quantityUnit: 'mt',
     dateFormat: 'unknown' as const,
     authMiddleware: 'bearerAuth',
     verified: false,
-    notes: 'Single-row shape not yet probed.',
+    notes:
+      'Accepts a contract UUID, a contract number or a PO number (KLIP 35d740f). Returns matched_by ' +
+      '("uuid" or "contract_or_po_number") and match_count - a PO can span several contracts under ' +
+      'multi-STO, and KLIP resolves one deterministically, so match_count > 1 means the answer is one ' +
+      'of several and must be reported as such. Carries linked shipments and payments INLINE. ' +
+      'The two business exclusions applied to list queries are SKIPPED here, so this endpoint can ' +
+      'return a contract that /contracts will never list.',
   },
 
   shipments: {
@@ -141,6 +152,9 @@ export const routes = {
     params: {
       page: 'page',
       limit: 'limit',
+      contractId: 'contractId',
+      stoNumber: 'stoNumber',
+      vesselName: 'vesselName',
       plant: 'plant',
       search: 'search',
       dateFrom: 'dateFrom',
@@ -169,6 +183,7 @@ export const routes = {
     params: {
       page: 'page',
       limit: 'limit',
+      contractId: 'contractId',
       plant: 'plant',
       location: 'location',
       search: 'search',

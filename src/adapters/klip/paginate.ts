@@ -33,7 +33,7 @@ export interface PageWalk<T> {
   calls: CallRecord[];
 }
 
-function dig(body: unknown, path: string): unknown {
+export function dig(body: unknown, path: string): unknown {
   if (path === '') return undefined;
   let cursor: unknown = body;
   for (const segment of path.split('.')) {
@@ -166,13 +166,47 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
   };
 }
 
-/** Single-object GET (e.g. /contracts/:id). Returns undefined on 404. */
-export async function fetchOne<T>(path: string, calls?: CallRecord[]): Promise<T | undefined> {
-  const body = await authorizedGet<unknown>(path, {}, calls);
-  if (body === undefined || body === null) return undefined;
+/**
+ * Single-object GET (e.g. /contracts/:id). Returns undefined on 404.
+ *
+ * This used to unwrap `data` unconditionally, which is right for a flat envelope and
+ * wrong for a nested one. /api/contracts/:id returns
+ *
+ *   data: { contract, shipments, payments, matched_by, match_count }
+ *
+ * so unwrapping to `data` handed the caller the WRAPPER. Every field read then resolved
+ * to null against a record that was present and populated - and the absent-record guard
+ * passed, because the object had keys. The tool reported contract_id "(unknown)" with
+ * every field null for a contract that search returns in full. Caught by the KLIP team
+ * probing this connector on 27 Aug 2026.
+ *
+ * The extraction path is now the route's own, so a route whose record sits somewhere
+ * other than `data` says so rather than relying on a shared assumption.
+ */
+export async function fetchOne<T>(
+  path: string,
+  extractPath = 'data',
+  calls?: CallRecord[],
+): Promise<T | undefined> {
+  const body = await fetchEnvelope(path, calls);
+  if (body === undefined) return undefined;
   if (typeof body === 'object' && !Array.isArray(body)) {
-    const wrapped = dig(body, 'data');
+    const wrapped = dig(body, extractPath);
     if (wrapped !== undefined && wrapped !== null) return wrapped as T;
+    return undefined;
   }
   return body as T;
+}
+
+/**
+ * The whole response body for a single-object GET.
+ *
+ * /api/contracts/:id carries linked shipments and payments INLINE alongside the record,
+ * plus matched_by and match_count. Fetching the envelope once and reading all of it beats
+ * three more round trips for data already in hand.
+ */
+export async function fetchEnvelope(path: string, calls?: CallRecord[]): Promise<unknown | undefined> {
+  const body = await authorizedGet<unknown>(path, {}, calls);
+  if (body === undefined || body === null) return undefined;
+  return body;
 }

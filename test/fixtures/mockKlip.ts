@@ -20,6 +20,8 @@ export const SERVICE_TOKEN = 'mock-klip-jwt-token';
 export const MAX_LIMIT = 100;
 
 export interface MockState {
+  /** Every contract the mock holds, so specs derive counts instead of hardcoding them. */
+  contracts: MockContract[];
   loginCalls: number;
   requests: Array<{ method: string; path: string; query: Record<string, unknown> }>;
   /** Force the next N authorized calls to answer 401. */
@@ -80,6 +82,41 @@ export function buildContracts(): MockContract[] {
   }
 
   // --- the awkward cases -------------------------------------------------
+
+  // Two contracts sharing ONE PO number. Real under multi-STO, and the case where a
+  // lookup by PO silently collapses a set into a single answer unless match_count is
+  // read. KLIP resolves one deterministically; the connector must say it did.
+  rows.push({
+    contract_id: '4700099010',
+    po_numbers: 'PO-2026-SHARED',
+    supplier: 'Supplier Multi A',
+    product: 'CPO',
+    plant_site: 'TJP',
+    incoterm: 'FOB',
+    status: 'ACTIVE',
+    unit: 'MT',
+    quantity_ordered: '400000',
+    quantity_delivery: '100000',
+    quantity_receive: '90000',
+    contract_date: '2026-08-03',
+    remarks: 'First of two contracts under one PO.',
+  });
+  rows.push({
+    contract_id: '4700099011',
+    po_numbers: 'PO-2026-SHARED',
+    supplier: 'Supplier Multi B',
+    product: 'CPO',
+    plant_site: 'TJP',
+    incoterm: 'FOB',
+    status: 'ACTIVE',
+    unit: 'MT',
+    quantity_ordered: '600000',
+    quantity_delivery: '200000',
+    quantity_receive: '180000',
+    contract_date: '2026-08-04',
+    remarks: 'Second of two contracts under one PO.',
+  });
+
   rows.push({
     contract_id: '4700099001',
     po_numbers: 'PO-2026-9001',
@@ -201,7 +238,10 @@ function bare<T>(rows: T[]): unknown {
 export function createMockKlip(state: MockState): Express {
   const app = express();
   app.use(express.json());
-  const contracts = buildContracts();
+  // ONE fixture, shared with the spec. Building a second copy here meant a spec could
+  // assert against a different array than the server served - identical today, silently
+  // divergent the moment either side is filtered or mutated.
+  const contracts = state.contracts;
 
   app.use((req, _res, next) => {
     state.requests.push({ method: req.method, path: req.path, query: { ...req.query } });
@@ -259,14 +299,61 @@ export function createMockKlip(state: MockState): Express {
     res.json(nested('contracts', rows, req));
   });
 
+  /**
+   * NESTED, and deliberately a different shape from the list endpoint.
+   *
+   *   detail:  data.{ contract, shipments, payments, matched_by, match_count }
+   *   list:    data.{ contracts, pagination }
+   *
+   * The fixture used to return data = the contract directly. That agreed with the
+   * connector's assumption, so the suite passed while the live tool reported
+   * contract_id "(unknown)" and every field null for a contract that search returned in
+   * full. A mock that mirrors the assumption cannot catch the assumption being wrong.
+   *
+   * A PO number can match several contracts, so match_count is real here too.
+   */
   app.get('/api/contracts/:id', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
-    const found = contracts.find((c) => c.contract_id === req.params.id || c.po_numbers === req.params.id);
+    const key = req.params.id;
+    const byPo = contracts.filter((c) => c.po_numbers === key);
+    const found = contracts.find((c) => c.contract_id === key) ?? byPo[0];
     if (found === undefined) {
-      res.status(404).json({ message: 'not found' });
+      res.status(404).json({ success: false, message: 'not found' });
       return;
     }
-    res.json({ success: true, data: found });
+    res.json({
+      success: true,
+      data: {
+        contract: found,
+        // Linked rows arrive inline, which is why the tool no longer makes
+        // separate calls for them.
+        shipments: [
+          {
+            id: 'SHP-INLINE-1',
+            sto_number: 'STO-88001',
+            vessel_name: 'MV Sawit Jaya',
+            status: 'DISCHARGING',
+            port_of_loading: 'Dumai',
+            port_of_discharge: 'Belawan',
+            quantity_shipped: 3_500_000,
+          },
+        ],
+        payments: [
+          {
+            id: 'PAY-INLINE-1',
+            invoiceNumber: 'INV-INLINE-1',
+            invoiceDate: '2026-07-01',
+            dueDate: '2026-07-31',
+            paidDate: '2026-08-05',
+            status: 'PAID',
+            amount: 4_500_000_000,
+            currency: 'IDR',
+          },
+        ],
+        matched_by: found.contract_id === key ? 'uuid' : 'contract_or_po_number',
+        match_count: found.contract_id === key ? 1 : Math.max(1, byPo.length),
+      },
+    });
   });
 
   app.get('/api/shipments', (req: Request, res: Response) => {
@@ -379,7 +466,9 @@ export function createMockKlip(state: MockState): Express {
 }
 
 export function freshState(): MockState {
-  return { loginCalls: 0, requests: [], failAuthTimes: 0, rejectCredentials: false };
+  // Exposed so a spec can assert against the fixture size rather than a literal
+  // that silently rots the moment a case is added.
+  return { contracts: buildContracts(), loginCalls: 0, requests: [], failAuthTimes: 0, rejectCredentials: false };
 }
 
 export async function startMockKlip(port: number, state: MockState = freshState()): Promise<{ server: Server; state: MockState }> {

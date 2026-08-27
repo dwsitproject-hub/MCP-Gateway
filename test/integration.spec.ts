@@ -155,9 +155,11 @@ describe('service-account session', () => {
 describe('pagination bound and the silent-clamp trap', () => {
   it('respects KLIP clamping limit to 100 and still reads every page', async () => {
     const { outcome } = await run('klip_outstanding', {});
-    // 254 contracts, clamped page size 100 -> 3 pages.
-    expect(outcome.coverage?.pages_fetched).toBe(3);
-    expect(outcome.coverage?.fetched_rows).toBe(254);
+    // The mock clamps page size to 100 however many rows exist, so the property under
+    // test is that EVERY page is read - not that the fixture holds a specific count.
+    const all = state.contracts.length;
+    expect(outcome.coverage?.pages_fetched).toBe(Math.ceil(all / 100));
+    expect(outcome.coverage?.fetched_rows).toBe(all);
     expect(outcome.truncated).toBe(false);
   });
 
