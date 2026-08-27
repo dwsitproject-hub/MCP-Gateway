@@ -107,7 +107,10 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
   async handler(params): Promise<ToolOutcome> {
     const route = routes.contracts;
 
-    const filterInput = { plant: params.plant, product: params.product };
+    // incoterm now goes upstream with the rest. Before this it was filtered locally,
+    // so an incoterm query still walked every contract for the plant and reported
+    // coverage over a population it was not asked about.
+    const filterInput = { plant: params.plant, product: params.product, incoterm: params.incoterm };
     const filters = buildFilters(route, filterInput);
 
     /**
@@ -148,7 +151,9 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
           (!filters.local.includes('product') || matchesLoosely(l.product, params.product)),
       );
     }
-    if (params.incoterm !== undefined) {
+    // Only if KLIP could not take it. buildFilters puts an unroutable filter in local[],
+    // so this stays correct whichever way the parameter is handled.
+    if (params.incoterm !== undefined && filters.local.includes('incoterm')) {
       const wanted = params.incoterm.trim().toLowerCase();
       lines = lines.filter((l) => (l.incoterm ?? '').trim().toLowerCase() === wanted);
     }

@@ -291,11 +291,25 @@ export function createMockKlip(state: MockState): Express {
   app.get('/api/contracts', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     let rows = contracts;
-    const { plant, product, status, supplier } = req.query as Record<string, string | undefined>;
+    const { plant, product, status, supplier, incoterms } = req.query as Record<string, string | undefined>;
     if (plant !== undefined) rows = rows.filter((c) => c.plant_site.toLowerCase() === plant.toLowerCase());
     if (product !== undefined) rows = rows.filter((c) => c.product.toLowerCase() === product.toLowerCase());
     if (status !== undefined) rows = rows.filter((c) => c.status.toLowerCase() === status.toLowerCase());
     if (supplier !== undefined) rows = rows.filter((c) => c.supplier.toLowerCase().includes(supplier.toLowerCase()));
+    /**
+     * incoterms, comma-separated. KLIP added this on 27 Aug 2026 at our request and it is
+     * NOT behind scope on this endpoint.
+     *
+     * Implemented here because the connector now routes the filter upstream instead of
+     * applying it locally. Without it the mock would accept the parameter and discard it -
+     * so a query for one incoterm would return every row, the test would pass, and the
+     * exact failure this connector keeps finding upstream would be baked into our own
+     * fixture.
+     */
+    if (incoterms !== undefined) {
+      const wanted = new Set(incoterms.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean));
+      rows = rows.filter((c) => wanted.has((c.incoterm ?? '').trim().toLowerCase()));
+    }
     res.json(nested('contracts', rows, req));
   });
 

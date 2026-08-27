@@ -41,6 +41,8 @@ export interface FilterInput {
   location?: string | undefined;
   date_from?: string | undefined;
   date_to?: string | undefined;
+  /** Routable upstream since KLIP added incoterms to /contracts on 27 Aug 2026. */
+  incoterm?: string | undefined;
 }
 
 export interface BuiltFilters {
@@ -62,6 +64,10 @@ const FILTER_TO_ROUTE_PARAM: Record<keyof FilterInput, keyof RouteContract['para
   location: 'location',
   date_from: 'dateFrom',
   date_to: 'dateTo',
+  // KLIP added incoterms to /contracts on 27 Aug 2026, so this no longer has to be a
+  // local filter. Routing it upstream means the row walk fetches the matching population
+  // instead of everything - and coverage then describes what was actually asked for.
+  incoterm: 'incoterm',
 };
 
 export function buildFilters(route: RouteContract, input: FilterInput): BuiltFilters {

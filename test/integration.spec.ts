@@ -328,3 +328,36 @@ describe('reference tool (H6)', () => {
     expect(data.incoterms.map((p) => p.value)).toContain('DAP');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('the incoterm filter goes upstream (KLIP 27 Aug)', () => {
+  it('sends incoterms to KLIP rather than filtering after the fetch', async () => {
+    await run('klip_outstanding', { plant: 'TJP', incoterm: 'FOB' });
+    const call = state.requests.filter((r) => r.path === '/api/contracts').pop();
+    expect(call?.query.incoterms).toBe('FOB');
+  });
+
+  it('narrows the fetch, so coverage describes the population asked about', async () => {
+    // Filtered locally, coverage reported every contract for the plant - a figure about a
+    // population the caller never asked for. Pushing it upstream makes coverage honest
+    // and stops fetching rows only to discard them.
+    const all = await run('klip_outstanding', { plant: 'TJP' });
+    const fob = await run('klip_outstanding', { plant: 'TJP', incoterm: 'FOB' });
+    expect(fob.outcome.coverage?.total_rows).toBeLessThan(all.outcome.coverage?.total_rows ?? 0);
+  });
+
+  it('returns only the requested incoterm', async () => {
+    const { outcome } = await run('klip_outstanding', { plant: 'TJP', incoterm: 'FOB' });
+    const rows = (outcome.data as { top_contracts: Array<{ incoterm: string | null }> }).top_contracts;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.incoterm).toBe('FOB');
+  });
+
+  it('returns nothing for an incoterm no contract uses, rather than everything', async () => {
+    // The failure mode this guards: an unrecognised filter accepted and discarded, so a
+    // narrow question comes back with the whole population and reads as the answer.
+    const { outcome } = await run('klip_outstanding', { plant: 'TJP', incoterm: 'NOPE' });
+    const rows = (outcome.data as { top_contracts: unknown[] }).top_contracts;
+    expect(rows).toHaveLength(0);
+  });
+});
