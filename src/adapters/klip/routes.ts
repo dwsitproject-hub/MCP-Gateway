@@ -209,11 +209,51 @@ export const routes = {
     authMiddleware: 'TBD (P1)',
     verified: false,
     notes:
-      'PATH UNKNOWN - still 404. Probed and rejected: /quality /qualities /quality-control /quality-checks ' +
-      '/qc /quality/results /quality/inspections /operations/quality /quality-results /lab /inspection ' +
-      '/inspections /survey /surveys /qualities/results /finance/quality /quality/reports /cargo-quality ' +
-      '/product-quality. Ask the KLIP team for the real path. FFA / M&I / IV / DOBI are measurements, ' +
-      'not quantities.',
+      'NO ENDPOINT EXISTS. Confirmed by the KLIP team 27 Aug 2026: there is no /api/quality* route and no ' +
+      'REST handler over quality_surveys anywhere in the codebase. Quality data is reachable only through ' +
+      'the pages that render it. Nineteen probed paths returned 404 because none of them exist, not ' +
+      'because the spelling was wrong. Logged as KLIP work, not a connector defect. ' +
+      'NOT the same thing as /oil-loss, which is gain/loss on movements - see the oilLoss route. ' +
+      'Pointing this tool at oil-loss would report one measurement under the name of another.',
+  },
+
+  /**
+   * Oil loss / gain across movements. A DIFFERENT dataset from quality surveys, despite
+   * the front-end presenting them near each other: this is weight reconciliation between
+   * dispatch and receipt, not laboratory measurement.
+   *
+   * Probed 27 Aug 2026. The envelope is unlike every other endpoint here:
+   *
+   *   { data: [...], ytdSummary: {...}, gainSummary: {...}, dataSources: {...} }
+   *
+   * No `success` wrapper, and NO PAGINATION AT ALL - no page, no limit, no total. Whether
+   * the server caps the row set is unmeasured, so the tool must not imply completeness.
+   *
+   * `dataSources` names the provenance of each quantity, which no other endpoint offers.
+   */
+  oilLoss: {
+    path: '/oil-loss',
+    // No pagination parameters are advertised. Sending page/limit would imply a control
+    // the caller does not have; whether they are silently ignored is unmeasured.
+    params: {},
+    rowsPath: 'data',
+    totalPagesPath: '',
+    maxLimit: 0,
+    // UNCONFIRMED. The payload mixes units and only labels some of them:
+    // gainSummary.totalGainKg is kilograms, ytdSummary.r1.totalMt is tonnes, and the
+    // row-level quantity_* fields carry no suffix either way. Left as 'none' so nothing
+    // is converted on a guess - a wrong choice here is a 1000x error.
+    quantityUnit: 'none',
+    dateFormat: 'unknown' as const,
+    authMiddleware: 'authenticateToken (no role gate)',
+    verified: false,
+    notes:
+      'GET /api/oil-loss, mounted at server.ts:212 with a root GET handler. Bearer token required, ' +
+      'no role gate beyond authentication. Carries the contract join directly: contract_number, ' +
+      'contract_ext_no, sto_number, po_number, operation_id. ' +
+      'quantity_sent is PRESENT and non-null here, which contradicts KLIP-004 (0 of 6766 in ' +
+      'trucking_operations.quantity_sent) - provenance and coverage queried with the KLIP team, ' +
+      'so sent is not surfaced until answered. Row-level units unconfirmed.',
   },
 
   payments: {

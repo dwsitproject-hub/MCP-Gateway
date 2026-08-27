@@ -80,7 +80,9 @@ describe('read-only enforcement across the whole tool surface (S1, M5)', () => {
     await run('klip_get_contract', { contract_id: '4700010001' });
     await run('klip_shipment_status', { contract_id: '4700010001' });
     await run('klip_trucking_ops', { contract_id: '4700010001' });
-    await run('klip_quality_surveys', { contract_id: '4700010001' });
+    // klip_quality_surveys is deliberately absent: it refuses before touching the
+    // network while KLIP exposes no quality endpoint, so it cannot contribute a
+    // request to this sweep. Its refusal is asserted separately below.
     await run('klip_payment_status', { status: 'any' });
     await run('klip_sap_import_status', { limit: 3 });
 
@@ -247,12 +249,19 @@ describe('injection drill (S2, TSD Section 13)', () => {
 
 // ---------------------------------------------------------------------------
 describe('unit discipline', () => {
-  it('reports quality measurements without a units label and without conversion', async () => {
-    const { outcome } = await run('klip_quality_surveys', { contract_id: '4700010001' });
-    expect(outcome.units).toBeNull();
-    const surveys = (outcome.data as { surveys: Array<{ ffa_pct: number | null; dobi: number | null }> }).surveys;
-    expect(surveys[0]?.ffa_pct).toBe(3.42);
-    expect(surveys[0]?.dobi).toBe(2.94);
+  it('refuses quality surveys as UNAVAILABLE rather than reporting an empty result', async () => {
+    // KLIP exposes no /api/quality* route (confirmed 27 Aug 2026). Walking a 404 yielded
+    // an empty row set, which this tool reported as "no surveys matched" - a claim about
+    // the cargo, when the truth is a claim about the connector. The distinction matters
+    // most to whoever is trying to establish whether a cargo was ever tested.
+    await expect(run('klip_quality_surveys', { contract_id: '4700010001' })).rejects.toMatchObject({
+      code: 'CAPABILITY_UNAVAILABLE',
+    });
+  });
+
+  it('says plainly that the absence is the connector, not the data', async () => {
+    const err = await run('klip_quality_surveys', { contract_id: '4700010001' }).catch((e: Error) => e);
+    expect(String((err as Error).message)).toContain('not a statement that no survey exists');
   });
 
   it('does not run payment amounts through the kg-to-MT conversion', async () => {

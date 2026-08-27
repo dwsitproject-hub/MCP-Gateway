@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'UNKNOWN_FILTER_VALUE'
   | 'UPSTREAM_AUTH'
   | 'UPSTREAM_ROUTE_MISSING'
+  | 'CAPABILITY_UNAVAILABLE'
   | 'UPSTREAM_UNAVAILABLE'
   | 'GUARD_BLOCK'
   | 'RATE_LIMITED'
@@ -104,6 +105,19 @@ export const upstreamRouteMissing = (path: string, status: number): GatewayError
       'correct the path in src/adapters/klip/routes.ts. Check whether the base URL needs an /api prefix.',
     { retryable: false, severity: 'high' },
   );
+
+/**
+ * The data exists in KLIP but no API exposes it.
+ *
+ * Distinct from NOT_FOUND, which means "we looked and there is none". Reporting an
+ * absent ENDPOINT as an empty RESULT tells the user no records exist, which is a
+ * different and much worse claim than admitting the connector cannot see them.
+ */
+export const capabilityUnavailable = (what: string, why: string): GatewayError =>
+  new GatewayError('CAPABILITY_UNAVAILABLE', `${what} is not available through this connector: ${why}`, {
+    retryable: false,
+    severity: 'low',
+  });
 
 export const upstreamUnavailable = (why: string): GatewayError =>
   new GatewayError('UPSTREAM_UNAVAILABLE', `The KLIP data source is not responding (${why}).`, { retryable: true });

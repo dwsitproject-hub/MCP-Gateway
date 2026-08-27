@@ -1,6 +1,19 @@
 /**
  * klip_quality_surveys - "DOBI at discharge for STO Z?"
  *
+ * CURRENTLY UNAVAILABLE. Confirmed by the KLIP team on 27 Aug 2026: no /api/quality*
+ * route exists and there is no REST handler over quality_surveys anywhere in KLIP.
+ * The data is reachable only through the pages that render it.
+ *
+ * The tool refuses rather than returning nothing. Walking a route that 404s produced an
+ * empty row set, which this tool then reported as "no surveys matched" - telling the
+ * user no survey exists for their shipment when the truth is that the connector cannot
+ * see any survey at all. An absent endpoint is not an empty result, and the difference
+ * matters most to whoever is trying to find out whether a cargo was tested.
+ *
+ * The mapping below is kept intact so the tool can be restored by pointing the route at
+ * a real path once KLIP ships one.
+ *
  * Quality measurements are NOT quantities: FFA, M&I, IV and DOBI pass through
  * unconverted. Running them through kgToMt would be the classic unit accident.
  */
@@ -9,7 +22,7 @@ import { walk } from './../../adapters/klip/paginate.js';
 import { routes } from './../../adapters/klip/routes.js';
 import { fields, pickNumber, pickString, type Row } from './../../adapters/klip/fields.js';
 import { toDateOnly } from './../../adapters/klip/normalize.js';
-import { invalidParams } from './../../core/errors.js';
+import { invalidParams, capabilityUnavailable } from './../../core/errors.js';
 import * as cache from './../../core/cache.js';
 import { buildFilters, localFilterNote, matchesLoosely } from './common.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
@@ -39,6 +52,18 @@ export const qualitySurveys: ToolDefinition<typeof inputShape> = {
   inputShape,
 
   async handler(params): Promise<ToolOutcome> {
+    // Refuse before touching the network. A 404 here would surface as an empty row set,
+    // and an empty row set reads as "no survey exists" - a claim about the cargo rather
+    // than about the connector.
+    if (!routes.quality.verified) {
+      throw capabilityUnavailable(
+        'Quality survey data (FFA, M&I, IV, DOBI)',
+        'KLIP exposes no API for it - the data is reachable only through the KLIP web pages. ' +
+          'This is not a statement that no survey exists for your shipment: check the KLIP quality ' +
+          'screen directly. An endpoint has been requested from the KLIP team.',
+      );
+    }
+
     if (params.shipment_id === undefined && params.contract_id === undefined) {
       throw invalidParams('Provide at least one of shipment_id or contract_id.', {
         required_one_of: ['shipment_id', 'contract_id'],

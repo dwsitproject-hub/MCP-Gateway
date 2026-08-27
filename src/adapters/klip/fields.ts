@@ -162,6 +162,47 @@ export const fields = {
     deviationDays: ['deviationDays', 'deviation_days', 'deviasiHari'],
   },
 
+  /**
+   * Oil loss / gain. Field names read from a live payload on 27 Aug 2026, so these are
+   * exact rather than candidate lists - the one place in this file where a single
+   * spelling is the whole story.
+   */
+  oilLoss: {
+    id: ['id'],
+    operationId: ['operation_id'],
+    contractNumber: ['contract_number', 'contract_ext_no'],
+    stoNumber: ['sto_number'],
+    poNumber: ['po_number'],
+    supplier: ['supplier'],
+    buyer: ['buyer'],
+    product: ['product'],
+    plant: ['plant_site', 'group_plant', 'group_name'],
+    vesselName: ['vessel_name'],
+    transportMode: ['transport_mode'],
+    transporter: ['transporter'],
+    loadingLocation: ['loading_location'],
+    unloadingLocation: ['unloading_location'],
+    status: ['status'],
+    incoterm: ['incoterm'],
+    contractDate: ['contract_date'],
+    operationDate: ['operation_date'],
+    quantityContract: ['quantity_contract'],
+    /** Dispatched from origin, in KLIP's vocabulary. */
+    dispatched: ['quantity_delivery'],
+    /** Weighed in at destination. Note the past participle here, unlike /trucking. */
+    received: ['quantity_received'],
+    /**
+     * PRESENT on this endpoint, contrary to KLIP-004's finding for trucking_operations.
+     * Deliberately not surfaced by the tool until KLIP confirms whether it is a real
+     * weighbridge-out weight and how many rows carry it.
+     */
+    sent: ['quantity_sent'],
+    sfal: ['quantity_sfal'],
+    sfbd: ['quantity_sfbd'],
+    gainLossAmount: ['gain_loss_amount'],
+    gainLossPercentage: ['gain_loss_percentage'],
+  },
+
   sapImport: {
     id: ['id', 'importId', 'import_id', 'batchId'],
     // VERIFIED 2026-08-21. KLIP returns exactly: id, import_date, import_timestamp,
