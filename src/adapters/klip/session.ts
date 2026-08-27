@@ -142,9 +142,21 @@ export async function authorizedGet<T>(
     calls?.push({ pathname: res.pathname, status: res.status, durationMs: res.durationMs });
 
     if (res.status === 403) {
-      // The read-only role is denying a read it should permit: a K1 configuration bug.
+      /**
+       * A role denying a read it should permit.
+       *
+       * The TSD names the intended role MCP_READONLY. The account actually provisioned
+       * carries role=MANAGEMENT, level=Admin, which reads as over-privileged from its
+       * name and is view-only in fact - confirmed by IT on 27 Aug 2026. So a 403 here is
+       * a grant problem on whatever role svc-mcp really holds, not evidence that the
+       * account was mis-scoped. Logging the name it reports avoids sending whoever
+       * debugs this looking for a role that does not exist on it.
+       */
       degraded = true;
-      logger.error({ pathname: res.pathname }, 'KLIP returned 403 on a GET - check MCP_READONLY grants (K1)');
+      logger.error(
+        { pathname: res.pathname },
+        'KLIP returned 403 on a GET - check the grants on the svc-mcp role as provisioned (K1)',
+      );
       throw upstreamAuth();
     }
     if (res.status === 404) {
