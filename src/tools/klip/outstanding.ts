@@ -210,8 +210,11 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
       breakdown_note:
         'There is no per-incoterm breakdown here. KLIP does not aggregate by incoterm in one response, and ' +
         'tallying the rows ourselves would produce figures that do not reconcile with the total above. To ' +
-        'break the total down, call this tool once per incoterm - KLIP partitions exactly, so the parts ' +
-        'sum to the whole.',
+        'break the total down, call this tool once per incoterm: the parts sum to the whole exactly. ' +
+        'Measured for Bontang/CPO on 27 Aug 2026 - FOB 54,469.780 + LCO 11,779.500 + FRC 24,715.610 + ' +
+        'CIF 38,263.788 = 129,228.678, matching the unfiltered total to three decimals, with contract ' +
+        'counts 133+83+178+2 = 396 likewise exact. An incoterm with no contracts returns zero rather ' +
+        'than an error, so a full sweep of the klip_reference incoterm list is safe.',
     };
 
     if (summary === undefined) {
