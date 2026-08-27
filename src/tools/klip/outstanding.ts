@@ -51,7 +51,6 @@ import { routes } from './../../adapters/klip/routes.js';
 import { type Row } from './../../adapters/klip/fields.js';
 import {
   aggregateOutstanding,
-  groupByIncoterm,
   kgToMt,
   outstanding as outstandingFor,
   topByOutstanding,
@@ -156,7 +155,6 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
 
     // Retained as a cross-check only. Never reported as a quantity - see the header.
     const crossCheck = aggregateOutstanding(lines);
-    const byIncoterm = groupByIncoterm(lines);
     const top = topByOutstanding(lines, TOP_N).map((l) => ({
       contract_id: l.contract_id,
       po_number: l.po_number,
@@ -185,7 +183,9 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
               // KLIP holds kilograms; converted once, here. Verified against the KLIP page.
               open_outstanding_mt: kgToMt(card?.openOutstandingQty ?? whole?.openOutstandingQty ?? null),
               close_outstanding_mt: kgToMt(whole?.closeOutstandingQty ?? null),
-              klip_contract_count: whole?.count ?? null,
+              // KLIP's count, and therefore THE count. No qualifier needed now that
+              // nothing here produces a rival figure.
+              contracts: whole?.count ?? null,
               open_on_time: card?.openOnTimeCount ?? null,
               open_late: card?.openLateCount ?? null,
               close_on_time: card?.closeOnTimeCount ?? null,
@@ -195,13 +195,18 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
         'KLIP /contracts/late-performance/summary - the figures its Contract Performance page renders, ' +
         'aggregated over the whole matching dataset with no pagination, converted from the kilograms KLIP ' +
         'holds to MT. These reconcile against the KLIP web page: it is the same number reached two ways. ' +
-        'klip_contract_count is KLIP\'s own count for this filter and does not describe the sample below.',
-      by_incoterm: byIncoterm,
+        'The contract count is KLIP\'s for this filter. It will not equal the number of rows listed below: ' +
+        'the rows are a sample, the count is the population.',
       top_contracts: top,
       top_contracts_note:
         `The ${TOP_N} contracts below are a SAMPLE of the matching set, ordered by outstanding quantity. ` +
         'They do not add up to the total above and are not meant to: the total covers every matching ' +
         'contract, the sample covers the rows read.',
+      breakdown_note:
+        'There is no per-incoterm breakdown here. KLIP does not aggregate by incoterm in one response, and ' +
+        'tallying the rows ourselves would produce figures that do not reconcile with the total above. To ' +
+        'break the total down, call this tool once per incoterm - KLIP partitions exactly, so the parts ' +
+        'sum to the whole.',
     };
 
     if (summary === undefined) {

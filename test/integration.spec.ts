@@ -176,16 +176,28 @@ describe('pagination bound and the silent-clamp trap', () => {
 // ---------------------------------------------------------------------------
 describe('klip_outstanding correctness (M1)', () => {
   it('excludes an unmapped incoterm instead of defaulting it to the shipped basis', async () => {
+    /**
+     * M1 still stands; only where it is observable has moved.
+     *
+     * This used to read the per-incoterm breakdown, which is gone: it was our tally over
+     * the rows read, and a figure that cannot reconcile with KLIP's total is a second
+     * answer to the same question. The property itself - an unrecognised incoterm is
+     * flagged and excluded, never silently pushed onto the shipped basis - is still
+     * reported, through data_quality and the cross-check exclusion count.
+     */
     const { outcome, envelope } = await run('klip_outstanding', { plant: 'TJP' });
-    const data = outcome.data as Record<string, never>;
-    const groups = data.by_incoterm as unknown as Array<{ incoterm: string; basis: string | null; outstanding_mt: number | null; excluded_lines: number }>;
-    const dap = groups.find((g) => g.incoterm === 'DAP');
+    const data = outcome.data as Record<string, unknown>;
 
-    expect(dap).toBeDefined();
-    expect(dap?.basis).toBeNull();
-    expect(dap?.outstanding_mt).toBeNull();
-    expect(dap?.excluded_lines).toBe(1);
+    // Flagged, by name, rather than absorbed.
     expect(envelope.data_quality?.unknown_incoterm).toBe(1);
+
+    // ...and kept out of the arithmetic rather than defaulted into it.
+    expect(String(data.excluded_from_cross_check)).toMatch(/incoterm was unrecognised/i);
+
+    // The breakdown that used to carry this is deliberately absent, and the payload says
+    // how to get a per-incoterm figure that DOES reconcile.
+    expect(data.by_incoterm).toBeUndefined();
+    expect(String(data.breakdown_note)).toMatch(/once per incoterm/i);
   });
 
   it('propagates a null quantity as an exclusion, not as zero', async () => {

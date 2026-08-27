@@ -95,16 +95,23 @@ export const searchContracts: ToolDefinition<typeof inputShape> = {
 
     // Aggregates over every matching row fetched, before slicing.
     const totalsKey = walked.truncated ? 'totals_partial' : 'totals';
+    /**
+     * Arithmetic on KLIP's rows, not a rival calculation.
+     *
+     * Summing quantity_ordered over the rows read is the same source reached by addition.
+     * An OUTSTANDING total is different: it needs a basis rule, ours differed from KLIP's,
+     * and the 24 August ruling settled which governs. So that figure is gone from here -
+     * klip_outstanding reports KLIP's own, over the whole matching set.
+     */
     const aggregate = {
-      matching_contracts: lines.length,
+      // KLIP's population count for this filter, not our tally of the rows we read. The
+      // two agree when the fetch is complete and diverge when it is bounded - and the
+      // divergence is exactly when reporting our own number would mislead.
+      matching_contracts: walked.totalRows ?? lines.length,
       qty_po_mt: kgToMt(sumKg(lines.map((l) => l.qty_po_kg))),
-      outstanding_mt: kgToMt(
-        lines.reduce<number | null>(
-          (acc, l) => (l.countable && l.outstanding_kg !== null ? (acc ?? 0) + l.outstanding_kg : acc),
-          null,
-        ),
-      ),
-      excluded_from_outstanding: lines.filter((l) => !l.countable).length,
+      outstanding_note:
+        'No outstanding total here. Use klip_outstanding, which reports KLIP\'s own figure over the whole ' +
+        'matching set rather than a second calculation over these rows.',
     };
 
     const shown = rows.slice(0, limit).map((row) => {
