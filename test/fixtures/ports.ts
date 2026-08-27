@@ -19,4 +19,5 @@ export const PORTS = {
   hubPairing: 5194,
   coverageWarning: 5195,
   detailEnvelope: 5196,
+  oilLoss: 5197,
 } as const;

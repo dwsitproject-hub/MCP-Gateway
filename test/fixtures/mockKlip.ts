@@ -457,6 +457,52 @@ export function createMockKlip(state: MockState): Express {
     );
   });
 
+  /**
+   * Oil loss. Envelope taken from a live payload on 27 Aug 2026 and unlike every other
+   * endpoint here: no `success` wrapper, no pagination, and top-level summary blocks
+   * beside the rows. quantity_sent IS populated here, contrary to /trucking.
+   */
+  app.get('/api/oil-loss', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    res.json({
+      data: [
+        {
+          id: 'OL-1', transport_mode: 'LAND', sto_type: 'STO', operation_id: 'OP-1',
+          contract_number: '4700010001', contract_ext_no: 'EXT-1', sto_number: 'STO-88001',
+          po_number: 'PO-2026-0001', supplier: 'Supplier A', buyer: 'EUP', product: 'CPO',
+          group_name: 'EUP EDIBLE OIL TJ.PURA', plant_site: 'TJP', vessel_name: null,
+          contract_date: '2026-08-01', operation_date: '2026-08-02', incoterm: 'FOB',
+          group_plant: 'EUP EDIBLE OIL TJ.PURA', quantity_contract: '500',
+          transporter: 'PT Angkut', loading_location: 'TJP', unloading_location: 'Cisadane',
+          status: 'completed', quantity_delivery: '30000', quantity_received: '29850',
+          quantity_sent: '30000', quantity_sfal: '0', quantity_sfbd: null,
+          gain_loss_amount: '-150', gain_loss_percentage: '-0.5',
+        },
+        {
+          id: 'OL-2', transport_mode: 'SEA', sto_type: 'STO', operation_id: 'OP-2',
+          contract_number: '4700010002', contract_ext_no: 'EXT-2', sto_number: 'STO-88002',
+          po_number: 'PO-2026-0002', supplier: 'Supplier B', buyer: 'EUP', product: 'PKO',
+          group_name: 'EUP BIOMASS TJ.PURA', plant_site: 'TJP', vessel_name: 'MV Sawit Jaya',
+          contract_date: '2026-08-03', operation_date: '2026-08-05', incoterm: 'LCO',
+          group_plant: 'EUP BIOMASS TJ.PURA', quantity_contract: '800',
+          transporter: null, loading_location: 'Dumai', unloading_location: 'Belawan',
+          status: 'completed', quantity_delivery: '50000', quantity_received: '50120',
+          quantity_sent: '50000', quantity_sfal: '0', quantity_sfbd: null,
+          gain_loss_amount: '120', gain_loss_percentage: '0.24',
+        },
+      ],
+      ytdSummary: {
+        year: 2026, dateFrom: '2026-01-01', dateTo: '2026-12-31',
+        r1: { avgMt: 0.1, avgPct: 0.2, totalMt: 1.2, totalPct: 0.3, sampleCount: 12 },
+      },
+      gainSummary: { totalGainKg: 120, gainCount: 1 },
+      dataSources: {
+        quantityDelivery: 'weighbridge', quantityReceive: 'weighbridge',
+        quantitySfal: 'sap', quantitySfbd: 'none',
+      },
+    });
+  });
+
   app.get('/api/sap-master-v2/imports', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json(

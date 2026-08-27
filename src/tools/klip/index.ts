@@ -12,6 +12,7 @@ import { getContract } from './getContract.js';
 import { outstanding } from './outstanding.js';
 import { paymentStatus } from './paymentStatus.js';
 import { qualitySurveys } from './qualitySurveys.js';
+import { oilLoss } from './oilLoss.js';
 import { reference } from './reference.js';
 import { sapImportStatus } from './sapImportStatus.js';
 import { searchContracts } from './searchContracts.js';
@@ -27,6 +28,7 @@ export const klipTools: ReadonlyArray<ToolDefinition<any>> = [
   shipmentStatus,
   truckingOps,
   qualitySurveys,
+  oilLoss,
   paymentStatus,
   sapImportStatus,
   // ...plus the reference lookup added from review finding H6.
