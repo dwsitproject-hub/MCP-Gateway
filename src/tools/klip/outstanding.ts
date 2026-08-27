@@ -11,6 +11,18 @@
  * on the contract row. A number read in Claude and the same number read on the KLIP web
  * page must agree, because they are now the same number reached two ways.
  *
+ * UNITS: KLIP HOLDS KILOGRAMS
+ *
+ * Confirmed 27 Aug 2026 and reconciled against the KLIP page. A contract for 3,500 MT
+ * with nothing shipped reports outstanding_quantity = 3500000, so both the per-contract
+ * field and the aggregate are kilograms. They are converted to MT once, here.
+ *
+ * Note what that means for contract rows: quantity_ordered is ALSO kilograms while the
+ * row's own `unit` field says "MT". That is the kg-labelled-as-MT trap the TSD warned
+ * about. We told the KLIP team the data contradicted that warning; it does not - the
+ * `unit` field names the business unit, not the storage unit. The connector's arithmetic
+ * was right throughout because it always treated the column as kilograms.
+ *
  * We used to compute outstanding ourselves - basis chosen by incoterm, zeroed on Close,
  * excluded on an unrecognised incoterm. That produced a second, competing figure for the
  * same question. The 24 August ruling settled which governs, and the honest way to
@@ -156,9 +168,9 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
       basis: l.basis,
       qty_po_mt: kgToMt(l.qty_po_kg),
       basis_qty_mt: kgToMt(l.basis_qty_kg),
-      // KLIP's own per-contract figure, not ours. A row a user reads here must match the
-      // row they read on the KLIP page.
-      outstanding: l.upstream_outstanding,
+      // KLIP's own per-contract figure, not ours, converted from kilograms. A row a user
+      // reads here must match the row they read on the KLIP page.
+      outstanding_mt: kgToMt(l.upstream_outstanding),
       data_quality: l.data_quality,
     }));
 
@@ -170,9 +182,10 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
         summary === undefined
           ? null
           : {
-              open_outstanding: card?.openOutstandingQty ?? whole?.openOutstandingQty ?? null,
-              close_outstanding: whole?.closeOutstandingQty ?? null,
-              contracts: whole?.count ?? null,
+              // KLIP holds kilograms; converted once, here. Verified against the KLIP page.
+              open_outstanding_mt: kgToMt(card?.openOutstandingQty ?? whole?.openOutstandingQty ?? null),
+              close_outstanding_mt: kgToMt(whole?.closeOutstandingQty ?? null),
+              klip_contract_count: whole?.count ?? null,
               open_on_time: card?.openOnTimeCount ?? null,
               open_late: card?.openLateCount ?? null,
               close_on_time: card?.closeOnTimeCount ?? null,
@@ -180,9 +193,9 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
             },
       totals_source:
         'KLIP /contracts/late-performance/summary - the figures its Contract Performance page renders, ' +
-        'aggregated over the whole matching dataset with no pagination. These will reconcile against ' +
-        'the KLIP web page. Quantities are reported exactly as KLIP states them; the connector applies ' +
-        'no conversion, so do not describe them as MT or kg.',
+        'aggregated over the whole matching dataset with no pagination, converted from the kilograms KLIP ' +
+        'holds to MT. These reconcile against the KLIP web page: it is the same number reached two ways. ' +
+        'klip_contract_count is KLIP\'s own count for this filter and does not describe the sample below.',
       by_incoterm: byIncoterm,
       top_contracts: top,
       top_contracts_note:
@@ -214,21 +227,24 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
      * side is kilograms and the other tonnes, which is the error class that would do the
      * most damage if it went unnoticed.
      */
-    const klipOpen = card?.openOutstandingQty ?? whole?.openOutstandingQty;
-    if (typeof klipOpen === 'number' && klipOpen > 0 && crossCheck.outstanding_mt !== null && !walked.truncated) {
-      const ratio = klipOpen / crossCheck.outstanding_mt;
+    const klipOpenMt = kgToMt(card?.openOutstandingQty ?? whole?.openOutstandingQty ?? null);
+    if (klipOpenMt !== null && klipOpenMt > 0 && crossCheck.outstanding_mt !== null && !walked.truncated) {
+      // MT against MT. Comparing KLIP's kilograms to our tonnes previously reported a
+      // 1590x "unit mismatch" for what is really a 1.59x difference in rules - a check
+      // that cries wolf is worse than no check.
+      const ratio = klipOpenMt / crossCheck.outstanding_mt;
       if (ratio > 100 || ratio < 0.01) {
         data.unit_mismatch_warning =
-          `KLIP reports ${klipOpen} outstanding where this connector's independent calculation gives ` +
-          `${crossCheck.outstanding_mt} MT - a factor of about ${Math.round(ratio > 1 ? ratio : 1 / ratio)}. ` +
-          'That is the signature of a kilogram/tonne mismatch. Report KLIP\'s figure, state its unit as ' +
-          'unconfirmed, and raise this with the KLIP team.';
+          `KLIP reports ${klipOpenMt} MT outstanding where an independent calculation over the same rows ` +
+          `gives ${crossCheck.outstanding_mt} MT - a factor of about ` +
+          `${Math.round(ratio > 1 ? ratio : 1 / ratio)}. Both sides are now converted to MT, so a factor ` +
+          'this large means one of them changed unit upstream. Report KLIP\'s figure and raise it.';
       } else if (ratio > 1.05 || ratio < 0.95) {
         data.reconciliation_note =
-          `KLIP reports ${klipOpen} outstanding; an independent calculation over the rows read gives ` +
-          `${crossCheck.outstanding_mt}. KLIP's figure is the one to quote - it is what the web page ` +
-          'shows and it covers the whole matching set. The difference is worth knowing about: the two ' +
-          'use different incoterm-basis and exclusion rules.';
+          `KLIP reports ${klipOpenMt} MT outstanding; an independent calculation over the rows read gives ` +
+          `${crossCheck.outstanding_mt} MT. Quote KLIP's figure - it is what the web page shows and it ` +
+          'covers the whole matching set. The gap reflects different incoterm-basis and exclusion rules, ' +
+          'not an error in either.';
       }
     }
 
@@ -253,9 +269,19 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
 
     return {
       data,
-      // No unit claimed: the reported totals are KLIP's and their unit is not yet
-      // confirmed. The per-contract qty_po_mt figures are MT per the row's own `unit`.
-      units: null,
+      // Everything quantitative in the payload is MT: KLIP's kilograms, converted once.
+      units: 'MT',
+      /**
+       * truncated below refers to the ROW SAMPLE. The total is KLIP's server-side
+       * aggregate and is complete regardless, so the envelope's default hint - "the
+       * figures cover only part of the matching data, do not quote any total" - would be
+       * false here and would contradict row_sample_warning in the same payload.
+       */
+      nextStep: walked.truncated
+        ? 'The TOTAL above is complete: KLIP aggregated it over the whole matching set. Only the ' +
+          'contract list is a partial sample, so do not add up the listed rows. Quote the total as it ' +
+          'stands, and narrow the filter only if the user wants the full contract list.'
+        : undefined,
       rowCount: top.length,
       // Coverage of the ROW SAMPLE. The total is KLIP's and is never page-bounded.
       truncated: walked.truncated,

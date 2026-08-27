@@ -84,9 +84,10 @@ export const fields = {
       * as null and every contract was flagged missing_qty_po - while the totals still
       * printed "0 outstanding", which reads as a fact rather than as no-data.
       *
-      * Rows carry their own `unit` field, observed as "MT". That CONTRADICTS the TSD's
-      * kg-labelled-as-MT warning for this endpoint; honour the row's unit, do not
-      * assume either way.
+      * Rows carry their own `unit` field, observed as "MT" - but the VALUES ARE KILOGRAMS.
+      * A 3,500 MT contract carries quantity_ordered 3500000. The `unit` field names the
+      * business unit, not the storage unit, so this IS the kg-labelled-as-MT trap the TSD
+      * warned about. Confirmed 27 Aug 2026 by reconciling against the KLIP page.
       */
     qtyPo: ['quantity_ordered', 'qtyPo', 'qty_po', 'quantityPo'],
     shipped: ['quantity_delivery', 'qtyShipped', 'qty_shipped', 'shippedQty'],

@@ -34,6 +34,16 @@ export interface ToolOutcome {
   dataQuality?: Record<string, number> | undefined;
   /** KLIP endpoints actually hit, for the audit record. Paths only, never query strings. */
   klipCalls: CallRecord[];
+  /**
+   * Overrides the envelope's default next_step.
+   *
+   * The default assumes truncated means the FIGURES are partial. That is no longer true
+   * everywhere: klip_outstanding takes its total from KLIP's server-side aggregate, so a
+   * bounded row sample leaves the total complete. Emitting "the figures cover only part
+   * of the matching data" there would contradict the tool's own payload and teach people
+   * to disregard a warning that is load-bearing elsewhere.
+   */
+  nextStep?: string | undefined;
 }
 
 /** A zod raw shape: the SDK converts it to the JSON Schema advertised to Claude. */

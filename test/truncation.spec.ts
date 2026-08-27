@@ -121,3 +121,40 @@ describe('bounded fetch reporting', () => {
     expect(contractCalls).toHaveLength(1);
   });
 });
+
+describe('the next_step must not contradict the payload', () => {
+  it('does not tell the caller the TOTAL is partial when only the row sample is', async () => {
+    // The default hint reads truncated as "the figures cover only part of the matching
+    // data ... do not quote any total". Since the total comes from KLIP's server-side
+    // aggregate that is false, and it contradicted row_sample_warning in the same
+    // payload - the cry-wolf failure KLIP-008 was about, reintroduced by our own change.
+    const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    expect(outcome.truncated).toBe(true);
+    expect(outcome.nextStep).toBeTypeOf('string');
+    expect(String(outcome.nextStep)).toMatch(/TOTAL above is complete/i);
+    expect(String(outcome.nextStep)).not.toMatch(/cover only part/i);
+    expect(String(outcome.nextStep)).toMatch(/do not add up the listed rows/i);
+  });
+
+  it('leaves the default hint alone for tools whose figures really are partial', async () => {
+    // klip_search_contracts aggregates the rows it read, so a bounded fetch DOES make
+    // its totals partial. The override must not have weakened that.
+    const outcome = await searchTool.handler({ limit: 5 } as never, ctx);
+    expect(outcome.truncated).toBe(true);
+    expect(outcome.nextStep).toBeUndefined();
+  });
+});
+
+describe('units', () => {
+  it('reports MT, converted from the kilograms KLIP holds', async () => {
+    // A 3,500 MT contract carries outstanding_quantity 3500000. Confirmed against the
+    // KLIP page on 27 Aug: the row unit field says "MT" and the column holds kg.
+    const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    expect(outcome.units).toBe('MT');
+    const data = outcome.data as Record<string, any>;
+    if (data.totals !== null) {
+      expect(Object.keys(data.totals)).toContain('open_outstanding_mt');
+      expect(Object.keys(data.totals)).not.toContain('open_outstanding');
+    }
+  });
+});

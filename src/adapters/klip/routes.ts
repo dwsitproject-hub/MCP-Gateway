@@ -121,7 +121,12 @@ export const routes = {
     rowsPath: 'data.contracts',
     totalPagesPath: 'data.pagination.totalPages',
     maxLimit: 1000,
-    quantityUnit: 'mt',
+    // KILOGRAMS, despite the row's own unit field saying "MT". Confirmed 27 Aug 2026 and
+    // reconciled against the KLIP page: a 3,500 MT contract carries quantity_ordered
+    // 3500000. The `unit` field names the BUSINESS unit, not the storage unit - which is
+    // exactly the kg-labelled-as-MT trap the TSD warned about, and which we wrongly told
+    // the KLIP team the data contradicted.
+    quantityUnit: 'kg',
     dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
     verified: true as const,
@@ -129,8 +134,9 @@ export const routes = {
     verifiedOn: '2026-08-21',
     notes:
       'Envelope: data.contracts[] + data.pagination{total,page,limit,totalPages}. Honours limit=1000 ' +
-      'un-clamped (6708 rows total). Rows carry unit="MT" - the TSD claim that contracts return kg is ' +
-      'CONTRADICTED by the data. Numerics arrive as STRINGS, so parse rather than assume. ' +
+      'un-clamped (6708 rows total). Rows carry unit="MT" but the QUANTITIES ARE KILOGRAMS - the TSD ' +
+      'warning was right and our earlier note here was wrong. Numerics arrive as STRINGS, so parse ' +
+      'rather than assume. ' +
       'Date filter takes bare YYYY-MM-DD and genuinely filters: dateFrom=2030-01-01 -> 0, ' +
       'dateTo=2020-12-31 -> 0, June window -> 1059. ISO-datetime, epoch-ms and DD/MM/YYYY each 400.',
   },

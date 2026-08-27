@@ -91,6 +91,14 @@ export interface EnvelopeMeta {
   coverage?: Coverage | undefined;
   /** Counts of data-quality notes across the rows, if any. */
   dataQuality?: Record<string, number> | undefined;
+  /**
+   * Replaces the default next_step.
+   *
+   * The default reads truncated as "the figures are partial". Where a tool takes its
+   * totals from a server-side aggregate that is false - the total is whole and only the
+   * row sample is bounded - so the tool supplies the accurate wording instead.
+   */
+  nextStep?: string | undefined;
 }
 
 export interface Envelope {
@@ -126,7 +134,11 @@ export function wrap(meta: EnvelopeMeta, data: unknown): Envelope {
   if (meta.dataQuality !== undefined && Object.keys(meta.dataQuality).length > 0) {
     envelope.data_quality = meta.dataQuality;
   }
-  if (meta.truncated) envelope.next_step = NARROW_HINT;
+  // A tool that knows more than the default says so. NARROW_HINT assumes truncated
+  // implies partial FIGURES; where the totals come from a server-side aggregate that is
+  // false, and a warning that is wrong here is a warning ignored where it matters.
+  if (meta.nextStep !== undefined) envelope.next_step = meta.nextStep;
+  else if (meta.truncated) envelope.next_step = NARROW_HINT;
   return envelope;
 }
 
