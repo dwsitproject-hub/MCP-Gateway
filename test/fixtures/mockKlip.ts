@@ -473,6 +473,57 @@ export function createMockKlip(state: MockState): Express {
    * Note also that incoterms lists SIX values while the contract sample only ever
    * produces three - the reason a canonical list is worth a round trip at all.
    */
+  /**
+   * KLIP's contract-performance aggregates. A SUMMARY OBJECT, not rows.
+   *
+   * The mock reproduces the filter behaviour measured on 27 Aug, not the documented
+   * behaviour: only transportMode and the date range change the response. incoterms,
+   * status and plant are accepted and discarded, exactly as KLIP does - so a test that
+   * expects them to narrow anything will fail here too, which is the point.
+   */
+  app.get('/api/contracts/late-performance/summary', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    const narrowed =
+      req.query.transportMode !== undefined ||
+      req.query.dateFrom !== undefined ||
+      req.query.dateTo !== undefined;
+    const n = narrowed ? 40 : 254;
+    res.json({
+      success: true,
+      data: {
+        scope: 'all',
+        ytd_range: { dateFrom: '2026-01-01', dateTo: '2026-12-31' },
+        summary: {
+          count: n, totalDays: n * 3, avgDays: 3.0, maxDays: 61,
+          totalQtyDelivery: n * 1000, avgLogCycle: 12, avgCashCycle: 30,
+          openOutstandingQty: n * 500, closeOutstandingQty: 0,
+        },
+        onTrackSummary: {
+          count: Math.floor(n / 2), totalDays: 0, avgDays: 0, maxDays: 0,
+          totalQtyDelivery: n * 400, avgLogCycle: 10, avgCashCycle: 28,
+          openOutstandingQty: n * 200, closeOutstandingQty: 0,
+        },
+        statusCardSummary: {
+          openOutstandingQty: n * 500, closeContractQty: 0,
+          openOnTimeCount: 10, openLateCount: 5, closeOnTimeCount: 2, closeLateCount: 1,
+          openAvgDays: 3.0, openAvgLogCycle: 12, openAvgDpCycle: 8, openAvgCashCycle: 30,
+          openIsLateContext: true,
+          closeAvgDays: 1.0, closeAvgLogCycle: 9, closeAvgDpCycle: 6, closeAvgCashCycle: 22,
+          closeIsLateContext: false,
+        },
+        distribution: {
+          noData: { count: 1, qty: 100 },
+          onTime: { count: 10, qty: 1000 },
+          d1_7: { count: 4, qty: 400 },
+          d8_14: { count: 2, qty: 200 },
+          d15_30: { count: 1, qty: 100 },
+          d31_60: { count: 1, qty: 100 },
+          d61plus: { count: 1, qty: 100 },
+        },
+      },
+    });
+  });
+
   app.get('/api/contracts/filter-options/group-plants', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     // Must be a SUPERSET of the plant values the contract fixture uses, as it is in

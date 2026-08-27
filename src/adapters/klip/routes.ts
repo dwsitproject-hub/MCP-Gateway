@@ -259,6 +259,52 @@ export const routes = {
    * distinguishes "EUP EDIBLE OIL TJ.PURA" from "EUP BIOMASS TJ.PURA". So the canonical
    * list is canonical for CONTRACT filtering and is NOT a plant register.
    */
+  /**
+   * KLIP's own contract-performance aggregates - the figures its Contract Performance
+   * page renders. Aggregated across the full filtered dataset with NO pagination, which
+   * is what makes them coherent where our page-bounded totals are not.
+   *
+   * FILTER SUPPORT IS MUCH NARROWER THAN DOCUMENTED. KLIP's remediation listed status,
+   * supplier, buyer, companyCode, plant, product(s), sourceType(s), transportMode,
+   * b2bFlag, dateFrom/dateTo, scope and search as server-side. Probed 27 Aug 2026, only
+   * two of those actually change the response:
+   *
+   *   HONOURED   transportMode, dateFrom/dateTo
+   *   IGNORED    incoterms, status, plant   (tested against scope=all/open/close/ytd
+   *                                          and with no scope - 15 combinations)
+   *
+   * `plant=x-nonexistent` returning a byte-identical response is conclusive: an applied
+   * filter matching nothing cannot leave the aggregates unchanged.
+   *
+   * So the tool built on this route exposes ONLY the two working parameters. Accepting a
+   * plant filter that KLIP discards would return company-wide figures labelled as one
+   * plant, which is the worst failure this connector can produce.
+   *
+   * Units of totalQtyDelivery / openOutstandingQty / closeOutstandingQty are NOT
+   * established and are not converted.
+   */
+  latePerformanceSummary: {
+    path: '/contracts/late-performance/summary',
+    params: {
+      transportMode: 'transportMode',
+      dateFrom: 'dateFrom',
+      dateTo: 'dateTo',
+    },
+    rowsPath: 'data',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'none',
+    dateFormat: 'iso-date' as const,
+    authMiddleware: 'bearerAuth',
+    verified: false,
+    notes:
+      'Returns data.{scope, ytd_range, summary, onTrackSummary, statusCardSummary, distribution} - a ' +
+      'summary object, not rows. Aggregated over the whole filtered set with no pagination. ' +
+      'Figures follow the KLIP outstanding rules, which govern per the 24 Aug ruling; our own ' +
+      'incoterm-basis calculation in klip_outstanding may differ, so the two must never be mixed in ' +
+      'one answer without saying which produced which.',
+  },
+
   filterOptionsGroupPlants: {
     path: '/contracts/filter-options/group-plants',
     params: {},

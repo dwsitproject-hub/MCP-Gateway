@@ -21,4 +21,5 @@ export const PORTS = {
   detailEnvelope: 5196,
   oilLoss: 5197,
   vocabulary: 5198,
+  performanceSummary: 5199,
 } as const;
