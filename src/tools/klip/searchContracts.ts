@@ -39,6 +39,9 @@ export function toContractLine(row: Row): ContractLineInput {
     qty_po_kg: pickNumber(row, fields.contract.qtyPo),
     shipped_kg: pickNumber(row, fields.contract.shipped),
     received_kg: pickNumber(row, fields.contract.received),
+    // KLIP computes outstanding itself; carry it so the connector can report KLIP's
+    // number rather than a second opinion.
+    upstream_outstanding: pickNumber(row, fields.contract.outstandingUpstream),
   };
 }
 

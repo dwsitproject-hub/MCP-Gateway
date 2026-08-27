@@ -37,16 +37,56 @@ afterAll(async () => {
 });
 
 describe('bounded fetch reporting', () => {
-  it('klip_outstanding publishes totals_partial and omits totals entirely', async () => {
+  /**
+   * H4.1 was: never publish a field called `totals` over a partial set, because that is
+   * the likeliest way this connector states a wrong number with confidence.
+   *
+   * Since 27 Aug the total no longer comes from the rows at all - it comes from KLIP's
+   * performance aggregate, computed over the whole matching dataset with no pagination.
+   * So a bounded ROW fetch no longer makes the TOTAL partial, and `totals` is safe.
+   *
+   * The hazard has not gone away, it has moved: the new way to state a wrong number would
+   * be to let someone add up a partial row sample and read it as the total. These assert
+   * the replacement invariant, which is stronger - the total is complete regardless of the
+   * row bound, and the sample says plainly that it is one.
+   */
+  it('publishes a complete total even when the ROW fetch is bounded', async () => {
     const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
     const data = outcome.data as Record<string, unknown>;
 
+    // The row walk IS bounded here - one page of three.
     expect(outcome.truncated).toBe(true);
-    expect(Object.keys(data)).toContain('totals_partial');
-    // The whole point: no field named "totals" over a partial set.
-    expect(Object.keys(data)).not.toContain('totals');
-    expect(data.partial_totals_warning).toBeTypeOf('string');
-    expect(String(data.partial_totals_warning)).toMatch(/NOT a complete/i);
+    // ...and the total is still whole, because KLIP aggregated it, not us.
+    expect(Object.keys(data)).toContain('totals');
+    expect(Object.keys(data)).not.toContain('totals_partial');
+    expect(String(data.totals_source)).toMatch(/no pagination/i);
+    expect(String(data.totals_source)).toMatch(/reconcile against/i);
+  });
+
+  it('warns that the CONTRACT LIST is a sample, and that the total is not affected', async () => {
+    const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    const data = outcome.data as Record<string, unknown>;
+    expect(String(data.row_sample_warning)).toMatch(/partial\s+sample/i);
+    expect(String(data.row_sample_warning)).toMatch(/total above is unaffected/i);
+    expect(String(data.top_contracts_note)).toMatch(/do not add up to the total/i);
+  });
+
+  it('reports no total at all rather than substituting our own', async () => {
+    // If KLIP's aggregate cannot be read, the honest output is an absent total. Falling
+    // back to the connector's own arithmetic would reintroduce the second number that
+    // the 24 Aug ruling exists to remove.
+    const src = await import('../src/tools/klip/outstanding.js');
+    const text = String(src.outstanding.description);
+    expect(text).toMatch(/READ-ONLY/);
+    // The guard itself is asserted through the payload contract: a null total carries an
+    // explicit explanation rather than a zero.
+    const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    const data = outcome.data as Record<string, unknown>;
+    if (data.totals === null) {
+      expect(String(data.totals_unavailable)).toMatch(/Do not sum them into a total/i);
+    } else {
+      expect(data.totals_unavailable).toBeUndefined();
+    }
   });
 
   it('reports coverage honestly: rows read versus rows that exist', async () => {

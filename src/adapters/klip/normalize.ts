@@ -143,6 +143,16 @@ export interface ContractLineInput {
   qty_po_kg?: number | null;
   shipped_kg?: number | null;
   received_kg?: number | null;
+  /**
+   * KLIP's OWN per-contract outstanding figure, carried through untouched.
+   *
+   * Since the 24 August ruling this is what gets reported per row - a figure a user reads
+   * in Claude must be the figure they read on the KLIP page. The connector's own
+   * calculation below still runs, but only as a cross-check.
+   *
+   * Unit as KLIP states it; deliberately not converted.
+   */
+  upstream_outstanding?: number | null;
 }
 
 export interface OutstandingLine {
@@ -157,6 +167,8 @@ export interface OutstandingLine {
   qty_po_kg: number | null;
   basis_qty_kg: number | null;
   outstanding_kg: number | null;
+  /** KLIP's own figure, passed through for reporting. See ContractLineInput. */
+  upstream_outstanding: number | null;
   /** True when this line's outstanding_kg may be added to a total. */
   countable: boolean;
   data_quality: DataQualityNote[];
@@ -213,6 +225,7 @@ export function outstanding(line: ContractLineInput): OutstandingLine {
     status: line.status ?? null,
     basis,
     qty_po_kg: qtyPo,
+    upstream_outstanding: line.upstream_outstanding ?? null,
   };
 
   // Cancelled / closed contracts count as zero regardless of quantities.
