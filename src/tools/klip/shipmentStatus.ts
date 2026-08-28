@@ -129,8 +129,23 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
     };
     const filters = buildFilters(route, filterInput);
 
+    /**
+     * 25 rows a page, up to 8 pages.
+     *
+     * /shipments costs about 240 ms per row upstream, so the default 100-row page took
+     * 16-18 s against a 15 s timeout and this tool failed with UPSTREAM_UNAVAILABLE on
+     * every call - reported by the user three times, and visible in an earlier chat as
+     * "the endpoint timed out three times before responding". Filtering does not help:
+     * plant=Bontang at 100 rows still took 16.3 s, because the cost is per row returned,
+     * not per row scanned.
+     *
+     * 25 rows lands near 7 s, comfortably inside the timeout, and pages 2..N are fetched
+     * concurrently - so 200 rows of headroom costs roughly three sequential pages of
+     * wall-clock, not eight. 200 covers any single plant (Bontang, the largest, has 143)
+     * and truncates honestly on an unfiltered call, where KLIP holds 428.
+     */
     const cached = await cache.through(cache.keyFor('klip_shipment_status', { ...filterInput }), async () =>
-      walk<Row>({ route, filters: filters.upstream, maxPages: 3 }),
+      walk<Row>({ route, filters: filters.upstream, maxPages: 8, pageSize: 25 }),
     );
     const walked = cached.value;
 

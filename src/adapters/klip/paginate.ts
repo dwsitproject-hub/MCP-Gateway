@@ -103,6 +103,19 @@ export interface WalkOptions {
   filters?: Record<string, string | number | undefined>;
   /** Override the page bound for a tool that needs less than the global ceiling. */
   maxPages?: number;
+  /**
+   * Override rows-per-page DOWNWARD for a slow endpoint.
+   *
+   * /shipments costs roughly 240 ms PER ROW upstream - measured 28 Aug 2026 at 6.0 s for
+   * 20 rows, 12.1 s for 50 and 16.3 s for 100 - so a 100-row page cannot complete inside
+   * KLIP_TIMEOUT_MS and the tool failed with UPSTREAM_UNAVAILABLE every time. Smaller
+   * pages fit inside the timeout, and pages 2..N already run concurrently, so the
+   * wall-clock cost of asking for more of them is far below the sum of their latencies.
+   *
+   * This is a request-shaping knob, NOT a statement about the endpoint's ceiling - that
+   * stays on the route as maxLimit, which is a measurement. Clamped to maxLimit anyway.
+   */
+  pageSize?: number;
   calls?: CallRecord[];
 }
 
@@ -113,7 +126,8 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
   const { route } = opts;
   const calls = opts.calls ?? [];
   const maxPages = Math.max(1, Math.min(opts.maxPages ?? cfg.KLIP_MAX_PAGES, cfg.KLIP_MAX_PAGES));
-  const pageSize = Math.max(1, Math.min(cfg.KLIP_PAGE_SIZE, route.maxLimit > 0 ? route.maxLimit : cfg.KLIP_PAGE_SIZE));
+  const requested = opts.pageSize ?? cfg.KLIP_PAGE_SIZE;
+  const pageSize = Math.max(1, Math.min(requested, route.maxLimit > 0 ? route.maxLimit : requested));
 
   const pageParam = route.params.page;
   const limitParam = route.params.limit;

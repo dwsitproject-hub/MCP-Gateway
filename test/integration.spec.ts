@@ -287,6 +287,20 @@ describe('typed errors', () => {
     expect(data.shipments[0]?.delivery_end_date).toBe('2026-01-10');
   });
 
+  it('asks /shipments for small pages, because it costs ~240ms per row', async () => {
+    // Measured 28 Aug 2026: 20 rows 6.0s, 50 rows 12.1s, 100 rows 16.3s - against a 15s
+    // timeout. The default 100-row page made this tool fail with UPSTREAM_UNAVAILABLE on
+    // every call. If someone drops the pageSize override, that failure comes straight
+    // back, and it comes back as an outage rather than as a wrong number.
+    state.requests.length = 0;
+    await run('klip_shipment_status', { plant: 'Bontang' });
+    const calls = state.requests.filter((r) => r.path === '/api/shipments');
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(Number(call.query.limit)).toBeLessThanOrEqual(25);
+    }
+  });
+
   it('names milestones by rung, so arrival before sailing is not a swapped column', async () => {
     // A live chat reported "ETD and ETA are swapped, seven for seven" as a KLIP defect.
     // It was this connector labelling arrival-at-the-loading-port as the voyage ETA.
