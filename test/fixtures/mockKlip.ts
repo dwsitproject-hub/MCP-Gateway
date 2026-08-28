@@ -594,7 +594,7 @@ export function createMockKlip(state: MockState): Express {
         contract_number: '1004030751', contract_ext_no: '006/TJIM-EUP/PK/VI/2026',
         po_number: '1001030751', supplier: 'TIMURJAYA INDOMAKMUR PT.', product: 'PK',
         plant_site: 'Bontang', group_name: 'ATIMURJAYA', vessel_name: 'BG. ELANG JAWA 1',
-        charter_type: 'V/C', transport_mode: 'SEA', incoterm: 'CIF', status: 'PLANNED',
+        charter_type: 'V/C', transport_mode: 'SEA', incoterm: 'CIF', status: 'COMPLETED',
         source_type: '3rd Party', port_of_loading: 'PKS TIMURJAYA INDOMAKMUR',
         port_of_discharge: 'EUP EDIBLE OIL BONTANG',
         cargo_readiness_date: '2026-07-20T00:00:00.000Z',
@@ -606,7 +606,14 @@ export function createMockKlip(state: MockState): Express {
         loading_ata_sailed: '2026-03-13T00:00:00.000Z',
         discharge_eta_completed: '2026-07-24T00:00:00.000Z',
         discharge_ata_completed: '2026-03-25T00:00:00.000Z',
-        total_delta_days: -8, loading_delta_eta_etb_days: -1, discharge_delta_eta_etb_days: 0,
+        // COMPLETED, so only the ACTUAL family is populated - as in production, where a
+        // finished voyage is measured against actuals and an in-flight one against
+        // estimates. A fixture populating both would hide a cohort mix-up.
+        status_note: 'completed cohort',
+        ata_total_delta_days: -8, ata_loading_delta_eta_etr_days: 10,
+        ata_loading_delta_eta_etb_days: -4, ata_loading_delta_etb_etc_days: -4,
+        ata_discharge_delta_eta_etb_days: -4, ata_discharge_delta_etb_etc_days: -7,
+        total_delta_days: null, loading_delta_eta_etb_days: null, discharge_delta_eta_etb_days: null,
         freight: null, fuel_consumption: null, pump_rate: null, sailing_speed: null, shortage: null,
       },
       {
@@ -624,7 +631,11 @@ export function createMockKlip(state: MockState): Express {
         loading_ata_sailed: '2026-08-08T00:00:00.000Z',
         discharge_eta_completed: '2026-08-10T00:00:00.000Z',
         discharge_ata_completed: '2026-08-16T00:00:00.000Z',
-        total_delta_days: 6, loading_delta_eta_etb_days: 3, discharge_delta_eta_etb_days: 4,
+        // On going: ESTIMATE family only.
+        total_delta_days: 6, loading_delta_eta_etr_days: 7,
+        loading_delta_eta_etb_days: -2, loading_delta_etb_etc_days: -2,
+        discharge_delta_eta_etb_days: -7, discharge_delta_etb_etc_days: -5,
+        ata_total_delta_days: null,
         freight: null, fuel_consumption: null, pump_rate: null, sailing_speed: null, shortage: null,
       },
       {

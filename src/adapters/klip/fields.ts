@@ -270,14 +270,29 @@ export const fields = {
     dischAtaBerthed: ['discharge_ata_berthed'],
     dischAtaStart: ['discharge_ata_start'],
     dischAtaCompleted: ['discharge_ata_completed'],
-    /** KLIP-COMPUTED delays, in days. Reported as-is. */
+    /**
+     * KLIP-COMPUTED delays in days, in TWO families. Reported as-is, signed.
+     *
+     * The plain names are the ESTIMATE family and apply to on-going voyages; the ata_
+     * names are the ACTUAL family and apply to completed ones. The KLIP page uses one or
+     * the other depending on which cohort a shipment is in, never both, because a voyage
+     * in flight can only be measured against a forecast.
+     *
+     * Note KLIP keeps "eta_etb" inside the ata_ names - ata_loading_delta_eta_etb_days
+     * is the ACTUAL arrival-to-berth figure despite reading otherwise.
+     */
     totalDeltaDays: ['total_delta_days'],
-    ataTotalDeltaDays: ['ata_total_delta_days'],
+    loadDeltaToReadiness: ['loading_delta_eta_etr_days'],
     loadDeltaArrivalToBerth: ['loading_delta_eta_etb_days'],
     loadDeltaBerthToComplete: ['loading_delta_etb_etc_days'],
-    loadDeltaToReadiness: ['loading_delta_eta_etr_days'],
     dischDeltaArrivalToBerth: ['discharge_delta_eta_etb_days'],
     dischDeltaBerthToComplete: ['discharge_delta_etb_etc_days'],
+    ataTotalDeltaDays: ['ata_total_delta_days'],
+    ataLoadDeltaToReadiness: ['ata_loading_delta_eta_etr_days'],
+    ataLoadDeltaArrivalToBerth: ['ata_loading_delta_eta_etb_days'],
+    ataLoadDeltaBerthToComplete: ['ata_loading_delta_etb_etc_days'],
+    ataDischDeltaArrivalToBerth: ['ata_discharge_delta_eta_etb_days'],
+    ataDischDeltaBerthToComplete: ['ata_discharge_delta_etb_etc_days'],
     /** Empty on staging - 0 of 370. Mapped so their absence is reportable, not invented. */
     freight: ['freight'],
     fuelConsumption: ['fuel_consumption'],

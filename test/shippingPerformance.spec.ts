@@ -1,14 +1,13 @@
 /**
- * klip_shipping_performance.
+ * klip_shipping_performance, rebuilt against the actual KLIP page.
  *
- * This tool exists because a chat asked about shipment performance and got an essay on
- * contract lateness: there was no shipping tool, so the model reached for the nearest
- * thing. The capability gap is now filled; these pin the properties that keep it from
- * overstating what it knows.
+ * The first version had the right endpoint and the wrong shape - one flat population,
+ * averaged across every row. The page uses TWO cohorts measured on different clocks:
+ * on-going voyages against estimates, completed ones against actuals. Averaging across
+ * them mixes a forecast with a record, and it did.
  *
- * On live data 137 of 370 shipments carry a delay figure and 90 have a completed
- * discharge. An average over those is an average over a third of the fleet, so every
- * metric must ship with its denominator.
+ * Verified against the page's own cards on 28 Aug 2026: 107 on-going, 263 completed,
+ * and the card values reproduce exactly once the sign is restored.
  */
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -36,74 +35,106 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-describe('planned against actual', () => {
-  it('reports KLIP delay figures rather than subtracting timestamps itself', async () => {
-    const out = await tool.handler({ limit: 10 } as never, ctx);
-    const d = out.data as Record<string, any>;
-    // Mean of -8 and 6 over the two shipments that HAVE a figure: -1.
-    expect(d.delay_days.total).toBe(-1);
-    expect(String(d.computed_by)).toMatch(/does not recompute/i);
+const run = async (args: Record<string, unknown> = {}) =>
+  (await tool.handler({ limit: 10, cohort: 'both', ...args } as never, ctx)).data as Record<string, any>;
+
+describe('the two cohorts', () => {
+  it('splits on status COMPLETED, the way the page does', async () => {
+    const d = await run();
+    expect(d.completed.shipments).toBe(1);
+    expect(d.on_going.shipments).toBe(2);
   });
 
-  it('carries both the estimated and the actual milestone, not just the gap', async () => {
-    const out = await tool.handler({ limit: 10 } as never, ctx);
-    const s = (out.data as { shipments: Array<Record<string, unknown>> }).shipments[0]!;
-    expect(s.loading_eta_arrival).toBe('2026-07-10');
-    expect(s.loading_ata_arrival).toBe('2026-03-12');
-    expect(s.vessel_name).toBe('BG. ELANG JAWA 1');
+  it('measures each cohort on its own clock', async () => {
+    const d = await run();
+    expect(d.on_going.basis).toMatch(/estimated/i);
+    expect(d.completed.basis).toMatch(/actual/i);
   });
 
-  it('converts quantities from the kilograms KLIP holds', async () => {
-    const out = await tool.handler({ limit: 10 } as never, ctx);
-    const s = (out.data as { shipments: Array<Record<string, unknown>> }).shipments[0]!;
-    expect(s.contract_qty_mt).toBe(1200);
-    expect(out.units).toBe('MT');
+  it('reads the ACTUAL delta family for completed voyages', async () => {
+    // The mock populates only ata_* on the completed row. Reading the estimate family
+    // there - as the first version did - would return null and report it as unmeasured.
+    const d = await run();
+    expect(d.completed.total.days).toBe(-8);
+    expect(d.completed.load_readiness.days).toBe(10);
+  });
+
+  it('reads the ESTIMATE family for on-going voyages', async () => {
+    const d = await run();
+    expect(d.on_going.total.days).toBe(6);
+    expect(d.on_going.load_readiness.days).toBe(7);
+  });
+
+  it('labels each shipment with the cohort it was measured in', async () => {
+    const d = await run();
+    const byId = Object.fromEntries(d.shipments.map((s: any) => [s.sto_number ?? s.contract_number, s.cohort]));
+    expect(Object.values(byId)).toContain('completed');
+    expect(Object.values(byId)).toContain('on_going');
+  });
+
+  it('returns one cohort when asked for one', async () => {
+    const d = await run({ cohort: 'completed' });
+    expect(d.shipments).toHaveLength(1);
+    expect(d.shipments[0].cohort).toBe('completed');
   });
 });
 
-describe('what it refuses to overstate', () => {
-  it('averages only over shipments that HAVE a figure, and says how many that was', async () => {
-    // Three shipments, two with a delay. A mean over three would treat the unmeasured one
-    // as zero - which reads as on time.
-    const out = await tool.handler({ limit: 10 } as never, ctx);
-    const d = out.data as Record<string, any>;
-    expect(d.delay_days.shipments_matched).toBe(3);
-    expect(d.delay_days.total_measured_on).toBe(2);
-    expect(String(d.coverage_note)).toMatch(/unmeasured, NOT on time/i);
+describe('what it refuses to flatten', () => {
+  it('keeps the SIGN the page throws away', async () => {
+    // The page renders "2 days" where the data holds -2, and most deltas are negative -
+    // events BEFORE estimate. A fleet running early and one running late must not read
+    // the same.
+    const d = await run();
+    expect(d.on_going.load_arrival_to_berth.days).toBe(-2);
+    expect(d.completed.discharge_berth_to_complete.days).toBe(-7);
+    expect(String(d.sign_note)).toMatch(/Do not describe a negative figure as a delay/i);
   });
 
-  it('reports total_rows as null, because KLIP gives no total here', async () => {
-    const out = await tool.handler({ limit: 10 } as never, ctx);
+  it('averages only over shipments carrying the measurement, and says how many', async () => {
+    const d = await run();
+    // Two on-going rows, one with figures. A mean over both would count the unmeasured
+    // one as zero, which reads as on time.
+    expect(d.on_going.shipments).toBe(2);
+    expect(d.on_going.total.measured_on).toBe(1);
+    expect(String(d.coverage_note)).toMatch(/UNMEASURED, not on time/i);
+  });
+
+  it('reports null rather than zero when a cohort has no measurement at all', async () => {
+    const d = await run({ vessel_name: 'no-such-vessel' });
+    expect(d.on_going.total.days).toBeNull();
+    expect(d.on_going.total.measured_on).toBe(0);
+  });
+
+  it('counts distinct vessels separately from shipments', async () => {
+    // The page labels its row count "Total Vessels"; they are not the same number.
+    const d = await run();
+    expect(d.on_going).toHaveProperty('distinct_vessels');
+    expect(d.completed.distinct_vessels).toBeLessThanOrEqual(d.completed.shipments);
+  });
+
+  it('asserts no completeness, because KLIP reports no total here', async () => {
+    const out = await tool.handler({ limit: 10, cohort: 'both' } as never, ctx);
     expect(out.coverage?.total_rows).toBeNull();
   });
-
-  it('says the always-empty columns are empty rather than reporting them as zero', async () => {
-    const out = await tool.handler({ limit: 10 } as never, ctx);
-    const json = JSON.stringify(out.data);
-    expect(String((out.data as { not_available: string }).not_available)).toMatch(/freight/i);
-    expect(json).not.toContain('"freight":0');
-    expect(json).not.toContain('"pump_rate":0');
-  });
 });
 
-describe('filters', () => {
+describe('filters and units', () => {
   it('sends plant to KLIP, the one filter it applies', async () => {
-    await tool.handler({ plant: 'Bontang', limit: 10 } as never, ctx);
+    await run({ plant: 'Bontang' });
     const call = state.requests.filter((r) => r.path === '/api/shipments/performance').pop();
     expect(call?.query.plant).toBe('Bontang');
   });
 
-  it('applies vessel locally, because KLIP accepts and discards it', async () => {
-    const out = await tool.handler({ vessel_name: 'BIO EXPRESS', limit: 10 } as never, ctx);
-    const ships = (out.data as { shipments: Array<{ vessel_name: string | null }> }).shipments;
-    expect(ships).toHaveLength(1);
-    expect(ships[0]?.vessel_name).toBe('MT. BIO EXPRESS');
-    expect(String((out.data as { filters_applied_locally: string }).filters_applied_locally))
-      .toMatch(/accepted by the endpoint and discarded/i);
+  it('applies vessel locally, and offers no period control that does nothing', async () => {
+    const d = await run({ vessel_name: 'BIO EXPRESS' });
+    expect(d.shipments).toHaveLength(1);
+    expect(Object.keys(tool.inputShape)).not.toContain('period');
+    expect(Object.keys(tool.inputShape)).not.toContain('scope');
+    expect(String(d.filters_applied_locally)).toMatch(/no working period filter/i);
   });
 
-  it('matches a shipment by its STO or PO number, not only the contract number', async () => {
-    const out = await tool.handler({ contract_number: '1001030752', limit: 10 } as never, ctx);
-    expect((out.data as { shipments: unknown[] }).shipments).toHaveLength(1);
+  it('converts quantities from the kilograms KLIP holds', async () => {
+    const d = await run({ cohort: 'completed' });
+    expect(d.shipments[0].contract_qty_mt).toBe(1200);
   });
 });
