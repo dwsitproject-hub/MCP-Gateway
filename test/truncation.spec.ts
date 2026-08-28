@@ -170,3 +170,29 @@ describe('units', () => {
     }
   });
 });
+
+describe('the payload offers exactly one outstanding figure', () => {
+  it('never publishes the connector own recompute alongside KLIP figure', async () => {
+    // A live chat was handed KLIP 129,228.678 MT and our 81,272.773 MT in the same
+    // payload, with "quote KLIP's". It spliced KLIP's FOB and LCO with our CIF and FRC
+    // and reported roughly 70,000 MT - a third total matching neither system. The
+    // single-source rule survived in the data and died in a sentence about the data.
+    const outcome = await outstandingTool.handler({ as_of_basis: 'current' } as never, ctx);
+    const json = JSON.stringify(outcome.data);
+    expect(json).not.toContain('reconciliation_note');
+    expect(json).not.toContain('excluded_from_cross_check');
+    expect(json).not.toContain('independent calculation');
+  });
+
+  it('keeps the gross-error alarm, which means something changed rather than differed', async () => {
+    // Suppressing the expected 1.59x gap must not suppress a 1000x one: that is a unit
+    // slip upstream, not a rules difference, and it has to reach the answer.
+    const src = await import('../src/tools/klip/outstanding.js');
+    expect(String(src.outstanding.description)).toContain('READ-ONLY');
+    const text = await import('node:fs').then((fs) =>
+      fs.readFileSync('src/tools/klip/outstanding.ts', 'utf8'),
+    );
+    expect(text).toContain('unit_mismatch_warning');
+    expect(text).toMatch(/ratio > 100 \|\| ratio < 0\.01/);
+  });
+});

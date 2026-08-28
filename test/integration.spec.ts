@@ -188,16 +188,22 @@ describe('klip_outstanding correctness (M1)', () => {
     const { outcome, envelope } = await run('klip_outstanding', { plant: 'TJP' });
     const data = outcome.data as Record<string, unknown>;
 
-    // Flagged, by name, rather than absorbed.
+    // Flagged by name in data_quality, which is where a row-level concern belongs.
     expect(envelope.data_quality?.unknown_incoterm).toBe(1);
 
-    // ...and kept out of the arithmetic rather than defaulted into it.
-    expect(String(data.excluded_from_cross_check)).toMatch(/incoterm was unrecognised/i);
-
-    // The breakdown that used to carry this is deliberately absent, and the payload says
-    // how to get a per-incoterm figure that DOES reconcile.
+    /**
+     * Everything about the connector's OWN cross-check is now logged rather than
+     * published, so this no longer asserts on it.
+     *
+     * That is deliberate. Publishing our exclusion count alongside KLIP's total invited
+     * the answer to discuss the connector instead of the contracts - the same pull that
+     * made a live chat splice two systems' figures into a third number. The property
+     * under test is that an unrecognised incoterm is FLAGGED and not silently defaulted
+     * onto the shipped basis; data_quality carries that, and nothing else needs to.
+     */
     expect(data.by_incoterm).toBeUndefined();
-    expect(String(data.breakdown_note)).toMatch(/once per incoterm/i);
+    expect(data.excluded_from_cross_check).toBeUndefined();
+    expect(data.reconciliation_note).toBeUndefined();
   });
 
   it('propagates a null quantity as an exclusion, not as zero', async () => {

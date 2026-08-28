@@ -56,6 +56,7 @@ import {
   topByOutstanding,
 } from './../../adapters/klip/normalize.js';
 import * as cache from './../../core/cache.js';
+import { logger } from './../../core/logger.js';
 import { buildFilters, countNotes, localFilterNote, matchesLoosely } from './common.js';
 import { assertFiltersRecognised } from './filterCheck.js';
 import { toContractLine } from './searchContracts.js';
@@ -100,7 +101,12 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
       'Contracts whose incoterm or quantities cannot be interpreted are excluded from the totals and reported ' +
       'under data_quality rather than silently counted as zero - always mention exclusions when they are present. ' +
       'Resolve plant and product wording with klip_reference first.',
-    `Returns aggregate totals plus the top ${TOP_N} contracts by outstanding quantity.`,
+    `Returns KLIP's totals plus up to ${TOP_N} contracts by outstanding quantity, as a SAMPLE - ` +
+      'the listed rows do not add up to the total and are not meant to. ' +
+      'For a per-incoterm split, call once per incoterm: the parts sum to the whole exactly ' +
+      '(measured for Bontang/CPO on 27 Aug 2026, matching to three decimals). ' +
+      'klip_contract_count is KLIP\'s own figure and its basis is unconfirmed - report it if asked, ' +
+      'but do not compute with it.',
   ),
   inputShape,
 
@@ -207,14 +213,6 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
         `The ${TOP_N} contracts below are a SAMPLE of the matching set, ordered by outstanding quantity. ` +
         'They do not add up to the total above and are not meant to: the total covers every matching ' +
         'contract, the sample covers the rows read.',
-      breakdown_note:
-        'There is no per-incoterm breakdown here. KLIP does not aggregate by incoterm in one response, and ' +
-        'tallying the rows ourselves would produce figures that do not reconcile with the total above. To ' +
-        'break the total down, call this tool once per incoterm: the parts sum to the whole exactly. ' +
-        'Measured for Bontang/CPO on 27 Aug 2026 - FOB 54,469.780 + LCO 11,779.500 + FRC 24,715.610 + ' +
-        'CIF 38,263.788 = 129,228.678, matching the unfiltered total to three decimals, with contract ' +
-        'counts 133+83+178+2 = 396 likewise exact. An incoterm with no contracts returns zero rather ' +
-        'than an error, so a full sweep of the klip_reference incoterm list is safe.',
     };
 
     if (summary === undefined) {
@@ -253,19 +251,35 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
           `${Math.round(ratio > 1 ? ratio : 1 / ratio)}. Both sides are now converted to MT, so a factor ` +
           'this large means one of them changed unit upstream. Report KLIP\'s figure and raise it.';
       } else if (ratio > 1.05 || ratio < 0.95) {
-        data.reconciliation_note =
-          `KLIP reports ${klipOpenMt} MT outstanding; an independent calculation over the rows read gives ` +
-          `${crossCheck.outstanding_mt} MT. Quote KLIP's figure - it is what the web page shows and it ` +
-          'covers the whole matching set. The gap reflects different incoterm-basis and exclusion rules, ' +
-          'not an error in either.';
+        /**
+         * Logged, NOT reported.
+         *
+         * This used to publish both figures with "quote KLIP's". Given two numbers and an
+         * invitation to compare, a model does forensics instead of answering: in a live
+         * chat it spliced KLIP's FOB and LCO with our recompute for CIF and FRC and
+         * produced a third total matching neither system. The single-source rule survived
+         * in the data and died in a sentence about the data.
+         *
+         * The gap is expected - the two use different basis and exclusion rules and
+         * KLIP's govern - so it is operator information, not part of the answer. The
+         * gross-error branch above still reports, because a factor of 100 means something
+         * changed upstream rather than merely differing.
+         */
+        logger.info(
+          { klipOpenMt, crossCheckMt: crossCheck.outstanding_mt, ratio: Number(ratio.toFixed(3)) },
+          'outstanding cross-check differs from KLIP - expected, KLIP governs',
+        );
       }
     }
 
     if (crossCheck.excluded_lines > 0) {
-      data.excluded_from_cross_check =
-        `${crossCheck.excluded_lines} of ${crossCheck.contracts} rows read could not be independently ` +
-        'checked because an incoterm was unrecognised or a quantity was missing. This does not affect the ' +
-        'total above, which is KLIP\'s.';
+      // Also logged rather than reported. It describes rows OUR check could not verify,
+      // which says nothing about KLIP's total and only invites the answer to discuss the
+      // connector instead of the contracts.
+      logger.info(
+        { excluded: crossCheck.excluded_lines, of: crossCheck.contracts },
+        'rows excluded from the outstanding cross-check',
+      );
     }
 
     const note = localFilterNote(filters.local);
