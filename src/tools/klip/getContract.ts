@@ -138,10 +138,19 @@ export const getContract: ToolDefinition<typeof inputShape> = {
       status: pickString(row, fields.shipment.status),
       loading_port: pickString(row, fields.shipment.loadingPort),
       discharge_port: pickString(row, fields.shipment.dischargePort),
-      etd: toWibIso(pickString(row, fields.shipment.etd)),
-      eta: toWibIso(pickString(row, fields.shipment.eta)),
-      atd: toWibIso(pickString(row, fields.shipment.atd)),
-      ata: toWibIso(pickString(row, fields.shipment.ata)),
+      // Named for the MILESTONE, not as an ETA/ETD pair. KLIP models a ladder -
+      // arrive at the loading port, berth, load, sail, then the discharge side - and
+      // squeezing it into "ETD/ETA" made arrival-at-loading look like a destination ETA
+      // sitting BEFORE its own departure. That was reported as a KLIP column swap; it
+      // was this mapping. See fields.shipment.
+      eta_loading_arrival: toWibIso(pickString(row, fields.shipment.etaLoadArrival)),
+      eta_sailed_from_loading: toWibIso(pickString(row, fields.shipment.etaSailed)),
+      eta_discharge_arrival: toWibIso(pickString(row, fields.shipment.etaDischArrival)),
+      eta_discharge_complete: toWibIso(pickString(row, fields.shipment.etaDischComplete)),
+      ata_loading_arrival: toWibIso(pickString(row, fields.shipment.ataLoadArrival)),
+      ata_sailed_from_loading: toWibIso(pickString(row, fields.shipment.ataSailed)),
+      ata_discharge_arrival: toWibIso(pickString(row, fields.shipment.ataDischArrival)),
+      ata_discharge_complete: toWibIso(pickString(row, fields.shipment.ataDischComplete)),
       qty_mt: kgToMt(pickNumber(row, fields.shipment.qty)),
     }));
 

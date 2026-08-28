@@ -370,32 +370,216 @@ export function createMockKlip(state: MockState): Express {
     });
   });
 
+  /**
+   * /shipments. Field names, quantity units and filter behaviour all copied from a live
+   * payload on 28 Aug 2026 rather than assumed.
+   *
+   * The previous fixture served camelCase keys - stoNumber, vesselName, etd, eta, atd,
+   * ata, qty - none of which KLIP emits. It agreed with the FIELD MAP instead of with
+   * KLIP, so it passed while every real quantity and date came back null.
+   *
+   * Three real behaviours are reproduced deliberately, because each caused a defect:
+   *   - plant, status and contractId FILTER; vesselName and stoNumber are ACCEPTED AND
+   *     IGNORED, so only the local pass can apply them.
+   *   - an unrecognised status is ignored too, returning everything.
+   *   - data.summary carries the KLIP-computed counts, and its parts do not sum to its
+   *     own total, because unplanned has no rows behind it.
+   */
   app.get('/api/shipments', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
-    const contractId = (req.query.contractId as string | undefined) ?? '4700010001';
-    res.json(
-      nested(
-        'shipments',
-        [
-          {
-            id: 'SHP-1',
-            stoNumber: 'STO-88001',
-            contractId,
-            vesselName: 'MV Sawit Jaya',
-            status: 'DISCHARGING',
-            loadingPort: 'Dumai',
-            dischargePort: 'Belawan',
-            etd: '2026-08-10T02:00:00.000Z',
-            eta: '2026-08-14T02:00:00.000Z',
-            atd: '2026-08-10T04:30:00.000Z',
-            ata: null,
-            qty: 3_500_000,
-          },
-        ],
-        req,
-        { total: 1, status: { unplanned: 0, planned: 0, atDischargePort: 1, completed: 0, cancelled: 0 } },
-      ),
-    );
+
+    const all = [
+      {
+        id: 'SHP-1',
+        sto_number: '1006019001',
+        contract_ext_no: '4700010001',
+        vessel_name: 'MT. GIAT ARMADA 02',
+        status: 'ARRIVED_DP',
+        plant_site: 'Bontang',
+        supplier: 'MAJU KALIMANTAN HADAPAN PT.',
+        product: 'CPO',
+        incoterm: 'FOB',
+        port_of_loading: 'Sebulu',
+        port_of_discharge: 'EUP EDIBLE OIL BONTANG',
+        delivery_start_date: '2026-07-01T00:00:00.000Z',
+        delivery_end_date: '2026-07-15T00:00:00.000Z',
+        eta_arrival: '2026-07-02T00:00:00.000Z',
+        eta_berthed: '2026-07-03T00:00:00.000Z',
+        eta_loading_complete: '2026-07-05T00:00:00.000Z',
+        eta_sailed: '2026-07-06T00:00:00.000Z',
+        eta_discharge_arrival: '2026-07-10T00:00:00.000Z',
+        eta_discharge_complete: '2026-07-12T00:00:00.000Z',
+        ata_vessel_arrival_at_loading_port: '2026-07-04T00:00:00.000Z',
+        ata_vessel_completed_loading: '2026-07-07T00:00:00.000Z',
+        ata_vessel_sailed_from_loading_port: '2026-07-08T00:00:00.000Z',
+        ata_vessel_arrive_at_discharge_port: '2026-07-13T00:00:00.000Z',
+        ata_vessel_complete_discharge: null,
+        contract_qty: '3500000.00',
+        sto_quantity: '3500000.00',
+        quantity_shipped: '3500000.00',
+        outstanding_quantity: '0.00',
+        arrival_date: null,
+        shipment_date: null,
+        is_delayed: false,
+        sla_days: null,
+        sfal_qty: null,
+        sfbd_qty: null,
+      },
+      {
+        id: 'SHP-2',
+        sto_number: '1006019814',
+        contract_ext_no: '4700010002',
+        vessel_name: null,
+        status: 'PLANNED',
+        plant_site: 'Bontang',
+        supplier: 'TANJUNG BUYU PERKASA PT.',
+        product: 'PK',
+        incoterm: 'CIF',
+        port_of_loading: 'PKS TANJUNG BUYU PERKASA',
+        port_of_discharge: 'EUP EDIBLE OIL BONTANG',
+        delivery_start_date: '2026-01-01T00:00:00.000Z',
+        delivery_end_date: '2026-01-10T00:00:00.000Z',
+        eta_arrival: null,
+        eta_berthed: null,
+        eta_loading_complete: null,
+        eta_sailed: null,
+        eta_discharge_arrival: null,
+        eta_discharge_complete: null,
+        ata_vessel_arrival_at_loading_port: null,
+        ata_vessel_completed_loading: null,
+        ata_vessel_sailed_from_loading_port: null,
+        ata_vessel_arrive_at_discharge_port: null,
+        ata_vessel_complete_discharge: null,
+        contract_qty: '1300000.00',
+        sto_quantity: '1300000.00',
+        quantity_shipped: '0',
+        outstanding_quantity: '1300000.00',
+        arrival_date: null,
+        shipment_date: null,
+        is_delayed: false,
+        sla_days: null,
+        sfal_qty: null,
+        sfbd_qty: null,
+      },
+      {
+        id: 'SHP-3',
+        sto_number: '1006019002',
+        contract_ext_no: '4700010003',
+        vessel_name: 'MV Sawit Jaya',
+        status: 'COMPLETED',
+        plant_site: 'Bontang',
+        supplier: 'HARAPAN SAWIT SEJAHTERAH PT.',
+        product: 'CPO',
+        incoterm: 'FOB',
+        port_of_loading: 'Pondong',
+        port_of_discharge: 'EUP EDIBLE OIL BONTANG',
+        delivery_start_date: '2026-05-01T00:00:00.000Z',
+        delivery_end_date: '2026-05-20T00:00:00.000Z',
+        eta_arrival: '2026-05-02T00:00:00.000Z',
+        eta_berthed: '2026-05-03T00:00:00.000Z',
+        eta_loading_complete: '2026-05-05T00:00:00.000Z',
+        eta_sailed: '2026-05-06T00:00:00.000Z',
+        eta_discharge_arrival: '2026-05-10T00:00:00.000Z',
+        eta_discharge_complete: '2026-05-12T00:00:00.000Z',
+        ata_vessel_arrival_at_loading_port: '2026-05-02T00:00:00.000Z',
+        ata_vessel_completed_loading: '2026-05-04T00:00:00.000Z',
+        ata_vessel_sailed_from_loading_port: '2026-05-05T00:00:00.000Z',
+        ata_vessel_arrive_at_discharge_port: '2026-05-09T00:00:00.000Z',
+        ata_vessel_complete_discharge: '2026-05-11T00:00:00.000Z',
+        contract_qty: '2750000.00',
+        sto_quantity: '2750000.00',
+        quantity_shipped: '2750000.00',
+        outstanding_quantity: '0.00',
+        arrival_date: null,
+        shipment_date: null,
+        is_delayed: false,
+        sla_days: null,
+        sfal_qty: null,
+        sfbd_qty: null,
+      },
+      {
+        id: 'SHP-4',
+        sto_number: '1006019003',
+        contract_ext_no: '4700010004',
+        vessel_name: 'EIHO',
+        status: 'PLANNED',
+        plant_site: 'TJ Pura',
+        supplier: 'BIO INTI AGRINDO PT.',
+        product: 'CPO',
+        incoterm: 'FOB',
+        port_of_loading: 'POM Bio Inti',
+        port_of_discharge: 'PLANT EUP TANJUNG PURA',
+        delivery_start_date: '2026-08-01T00:00:00.000Z',
+        delivery_end_date: '2026-08-25T00:00:00.000Z',
+        eta_arrival: null,
+        eta_berthed: null,
+        eta_loading_complete: null,
+        eta_sailed: null,
+        eta_discharge_arrival: null,
+        eta_discharge_complete: null,
+        ata_vessel_arrival_at_loading_port: null,
+        ata_vessel_completed_loading: null,
+        ata_vessel_sailed_from_loading_port: null,
+        ata_vessel_arrive_at_discharge_port: null,
+        ata_vessel_complete_discharge: null,
+        contract_qty: '3000000.00',
+        sto_quantity: '3000000.00',
+        quantity_shipped: '0',
+        outstanding_quantity: '3000000.00',
+        arrival_date: null,
+        shipment_date: null,
+        is_delayed: false,
+        sla_days: null,
+        sfal_qty: null,
+        sfbd_qty: null,
+      },
+    ];
+
+    const plant = req.query.plant as string | undefined;
+    const status = req.query.status as string | undefined;
+    const contractId = req.query.contractId as string | undefined;
+
+    let rows = all;
+    if (plant !== undefined) rows = rows.filter((r) => r.plant_site === plant);
+    if (contractId !== undefined) rows = rows.filter((r) => r.contract_ext_no === contractId);
+    // ARRIVED_DP is the page at-discharge-port bucket and covers UNLOADING too. An
+    // UNRECOGNISED status is ignored rather than rejected, exactly as KLIP does - which
+    // is why the tool enforces the enum itself.
+    if (status !== undefined) {
+      const bucket: Record<string, string[]> = {
+        PLANNED: ['PLANNED'],
+        LOADING: ['LOADING'],
+        SAILED: ['SAILED'],
+        ARRIVED_DP: ['ARRIVED_DP', 'UNLOADING'],
+        COMPLETED: ['COMPLETED'],
+        CANCELLED: ['CANCELLED'],
+      };
+      const want = bucket[status];
+      if (want !== undefined) rows = rows.filter((r) => want.includes(r.status));
+    }
+    // vesselName and stoNumber are accepted and DISCARDED, as KLIP discards them.
+
+    // The KLIP-computed counts. `unplanned` has no rows behind it, so the parts sum
+    // higher than the total - the real Bontang summary reads 143 against parts of 179.
+    const summary = {
+      total: rows.length,
+      status: {
+        unplanned: 2,
+        preplanned: 0,
+        planned: rows.filter((r) => r.status === 'PLANNED').length,
+        atLoadingPort: rows.filter((r) => r.status === 'LOADING').length,
+        sailed: rows.filter((r) => r.status === 'SAILED').length,
+        atDischargePort: rows.filter((r) => r.status === 'ARRIVED_DP' || r.status === 'UNLOADING').length,
+        completed: rows.filter((r) => r.status === 'COMPLETED').length,
+        cancelled: rows.filter((r) => r.status === 'CANCELLED').length,
+      },
+      statusVesselNames: {
+        planned: rows.filter((r) => r.status === 'PLANNED' && r.vessel_name !== null).map((r) => r.vessel_name),
+        atDischargePort: rows.filter((r) => r.status === 'ARRIVED_DP').map((r) => r.vessel_name),
+      },
+    };
+
+    res.json(nested('shipments', rows, req, summary));
   });
 
   app.get('/api/trucking', (req: Request, res: Response) => {

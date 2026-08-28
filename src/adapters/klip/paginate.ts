@@ -31,6 +31,15 @@ export interface PageWalk<T> {
   totalPages: number | null;
   pagesFetched: number;
   calls: CallRecord[];
+  /**
+   * The page-1 envelope, unmodified.
+   *
+   * Several KLIP list endpoints carry an aggregate BESIDE the rows - /shipments puts a
+   * full status breakdown under data.summary - and that aggregate is KLIP's own figure.
+   * Without this, a tool wanting it had to either re-fetch the endpoint or recount the
+   * rows itself, and recounting is how a second, rival number gets born.
+   */
+  firstBody: unknown;
 }
 
 export function dig(body: unknown, path: string): unknown {
@@ -133,6 +142,7 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
       totalPages,
       pagesFetched: 1,
       calls,
+      firstBody,
     };
   }
 
@@ -163,6 +173,7 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
     totalPages,
     pagesFetched: pagesToFetch,
     calls,
+    firstBody,
   };
 }
 

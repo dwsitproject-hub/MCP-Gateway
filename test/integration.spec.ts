@@ -226,8 +226,84 @@ describe('typed errors', () => {
     });
   });
 
-  it('requires at least one identifying filter on shipment status', async () => {
-    await expect(run('klip_shipment_status', {})).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+  it('rejects a shipment status KLIP would silently ignore', async () => {
+    // KLIP returns EVERY row for status=BOGUS rather than 400, so an unchecked string
+    // would answer a filtered question with the unfiltered table. The enum has to be
+    // enforced on this side, and this is the test that it is.
+    //
+    // The rejection is a ZodError, not a GatewayError: schema validation happens before
+    // the handler runs, in the MCP layer, and this harness parses the same way.
+    await expect(run('klip_shipment_status', { status: 'BOGUS' })).rejects.toThrow(/Invalid option/);
+  });
+
+  it('applies vessel_name locally, because KLIP accepts it and ignores it', async () => {
+    // The regression that started this: vesselName was declared as an upstream param, so
+    // buildFilters believed KLIP had applied it and skipped the local pass. KLIP had not,
+    // and the tool returned the whole table as that vessel's shipments.
+    const { outcome } = await run('klip_shipment_status', { vessel_name: 'EIHO' });
+    const data = outcome.data as {
+      shipments: Array<{ vessel_name: string | null }>;
+      summary_scope: string;
+    };
+    expect(data.shipments).toHaveLength(1);
+    expect(data.shipments[0]?.vessel_name).toBe('EIHO');
+    // And the caller is told the KLIP summary is WIDER than the rows, because it is.
+    expect(data.summary_scope).toMatch(/WIDER/);
+  });
+
+  it('reports the KLIP status summary rather than recounting rows', async () => {
+    const { outcome } = await run('klip_shipment_status', { plant: 'Bontang' });
+    const data = outcome.data as {
+      klip_status_summary: { planned: number; at_discharge_port: number; completed: number };
+      klip_summary_reconciliation?: string;
+      summary_scope: string;
+    };
+    expect(data.klip_status_summary.planned).toBe(1);
+    expect(data.klip_status_summary.at_discharge_port).toBe(1);
+    expect(data.klip_status_summary.completed).toBe(1);
+    // KLIP's parts do not sum to KLIP's own total. That is surfaced, not smoothed.
+    expect(data.klip_summary_reconciliation).toMatch(/sum to 5 against its own total of 3/);
+    expect(data.summary_scope).toMatch(/covers exactly this query/);
+  });
+
+  it('ages open shipments against the delivery window KLIP publishes', async () => {
+    // The user's actual question - past the due delivery end with no estimate and no
+    // actual - which a live chat answered with "no delivery-end-date field exists".
+    const { outcome } = await run('klip_shipment_status', { plant: 'Bontang', open_only: true });
+    const data = outcome.data as {
+      delivery_window_ageing: {
+        open_shipments_considered: number;
+        past_delivery_end_7_days_or_more: number;
+        of_those_no_estimate_and_no_actual: number;
+      };
+      shipments: Array<{ delivery_end_date: string | null; days_past_delivery_end: number | null }>;
+    };
+    // SHP-1 (ARRIVED_DP) and SHP-2 (PLANNED) are open; SHP-3 is COMPLETED.
+    expect(data.delivery_window_ageing.open_shipments_considered).toBe(2);
+    expect(data.delivery_window_ageing.past_delivery_end_7_days_or_more).toBe(2);
+    // Only SHP-2 has neither an estimate nor an actual anywhere.
+    expect(data.delivery_window_ageing.of_those_no_estimate_and_no_actual).toBe(1);
+    // Most overdue first, so the answer survives the row cap.
+    expect(data.shipments[0]?.delivery_end_date).toBe('2026-01-10');
+  });
+
+  it('names milestones by rung, so arrival before sailing is not a swapped column', async () => {
+    // A live chat reported "ETD and ETA are swapped, seven for seven" as a KLIP defect.
+    // It was this connector labelling arrival-at-the-loading-port as the voyage ETA.
+    const { outcome } = await run('klip_shipment_status', { contract_id: '4700010001' });
+    const s = (
+      outcome.data as {
+        shipments: Array<{
+          eta_loading_arrival: string | null;
+          eta_sailed_from_loading: string | null;
+          ata_loading_arrival: string | null;
+        }>;
+      }
+    ).shipments[0];
+    expect(s?.eta_loading_arrival).toBe('2026-07-02');
+    expect(s?.eta_sailed_from_loading).toBe('2026-07-06');
+    // The real actuals live in ata_vessel_*, which the old map never read.
+    expect(s?.ata_loading_arrival).toBe('2026-07-04');
   });
 
   it('rejects an unknown filter VALUE distinctly from an empty result (H6)', async () => {
@@ -294,8 +370,8 @@ describe('unit discipline', () => {
 
   it('converts shipment quantities from kg to MT exactly once', async () => {
     const { outcome } = await run('klip_shipment_status', { contract_id: '4700010001' });
-    const shipments = (outcome.data as { shipments: Array<{ qty_mt: number | null }> }).shipments;
-    expect(shipments[0]?.qty_mt).toBe(3500); // 3,500,000 kg
+    const shipments = (outcome.data as { shipments: Array<{ shipped_qty_mt: number | null }> }).shipments;
+    expect(shipments[0]?.shipped_qty_mt).toBe(3500); // 3,500,000 kg
   });
 
   it('computes trucking gain/loss from dispatched versus received, in KLIP terms', async () => {

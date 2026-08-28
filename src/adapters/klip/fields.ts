@@ -100,23 +100,89 @@ export const fields = {
     remarks: ['remarks', 'remark', 'notes', 'keterangan'],
   },
 
+  /**
+   * Shipments. Names read from a live /api/shipments payload on 28 Aug 2026 - 112 keys
+   * on the row - so these are exact rather than candidates.
+   *
+   * THE OLD MAP INVENTED A DEFECT. It had:
+   *
+   *   eta: eta_arrival     etd: eta_sailed
+   *   ata: arrival_date    atd: shipment_date
+   *
+   * eta_arrival is the ETA at the LOADING port and eta_sailed is the departure from it,
+   * so arrival is CORRECTLY before departure - but presented as a bare ETA/ETD pair it
+   * reads as a column swap. A live chat reported exactly that to the user, "seven for
+   * seven, a column swap in the source", and it was about to go to the KLIP team as a
+   * defect. Measured over Bontang: eta_arrival <= eta_sailed on 51 of 52 rows, and
+   * eta_sailed <= eta_discharge_arrival on 45 of 45. The ladder is coherent.
+   *
+   * arrival_date and shipment_date are null on all 143 rows, which is why the same chat
+   * concluded "ATD/ATA came back null on every single record I have queried" and wondered
+   * whether the completed cohort was measuring against nothing. The actuals live in the
+   * ata_vessel_* ladder and are populated on 56-58 of 143.
+   *
+   * So both fields are named for the MILESTONE they hold. There is no ETA/ETD pair here,
+   * because KLIP does not model one.
+   */
   shipment: {
-    id: ['id', 'shipmentId', 'shipment_id'],
-    stoNumber: ['stoNumber', 'sto_number', 'sto', 'stoNo'],
-    contractId: ['contractId', 'contract_id', 'contract.id'],
-    vesselName: ['vesselName', 'vessel_name', 'vessel', 'namaKapal'],
-    loadingPort: ['port_of_loading', 'loadingPort', 'loading_port', 'portLoading'],
-    dischargePort: ['port_of_discharge', 'dischargePort', 'discharge_port', 'portDischarge'],
-    status: ['status', 'shipmentStatus', 'shipment_status'],
-    // KLIP exposes a whole eta_* ladder (arrival, berthed, loading_start,
-    // loading_complete, sailed, then the discharge-side equivalents) rather than a
-    // plain ETD/ETA pair. These map the nearest equivalent; the ladder is richer than
-    // the four fields this tool reports and is worth revisiting.
-    etd: ['eta_sailed', 'etd', 'ETD', 'estimatedDeparture'],
-    eta: ['eta_arrival', 'eta', 'ETA', 'estimatedArrival'],
-    atd: ['shipment_date', 'atd', 'ATD', 'actualDeparture'],
-    ata: ['arrival_date', 'ata', 'ATA', 'actualArrival'],
-    qty: ['quantity_shipped', 'quantity_delivered', 'qty', 'quantity'],
+    id: ['id', 'shipment_id'],
+    stoNumber: ['sto_number', 'sto_key'],
+    contractId: ['contract_ext_no', 'contract_numbers', 'contractId', 'contract_id'],
+    poNumber: ['po_numbers', 'contract_reference_po'],
+    vesselName: ['vessel_name', 'vessel_name_klip', 'vessel_name_master', 'vessel_name_sap'],
+    voyageNo: ['voyage_no'],
+    charterType: ['charter_type'],
+    loadingPort: ['port_of_loading', 'loading_ports', 'loading_ports_klip'],
+    dischargePort: ['port_of_discharge', 'discharge_ports', 'discharge_ports_klip'],
+    plant: ['plant_site'],
+    supplier: ['supplier'],
+    buyer: ['buyer'],
+    product: ['product'],
+    incoterm: ['incoterm'],
+    groupName: ['group_name'],
+    sourceType: ['source_type', 'contract_source_type'],
+    status: ['status'],
+    /** Boolean, and FALSE on all 143 Bontang rows while the page shows many as Late. */
+    isDelayed: ['is_delayed'],
+    /** Empty on staging - 0 of 143. */
+    slaDays: ['sla_days'],
+    /** The contract delivery window. Populated on 143 of 143 - this is the page's
+     *  "Due Date Delivery Start/End", and the field a chat reported as not existing. */
+    deliveryStartDate: ['delivery_start_date'],
+    deliveryEndDate: ['delivery_end_date'],
+    contractDate: ['contract_date'],
+    /** Planned ladder, loading side then discharge side. */
+    etaLoadArrival: ['eta_arrival'],
+    etaLoadBerthed: ['eta_berthed'],
+    etaLoadStart: ['eta_loading_start'],
+    etaLoadComplete: ['eta_loading_complete'],
+    etaSailed: ['eta_sailed'],
+    etaDischArrival: ['eta_discharge_arrival'],
+    etaDischBerthed: ['eta_discharge_berthed'],
+    etaDischStart: ['eta_discharge_start'],
+    etaDischComplete: ['eta_discharge_complete', 'eta_vessel_complete_discharge'],
+    /** Actual ladder. These are the real ATAs; arrival_date and shipment_date are dead. */
+    ataLoadArrival: ['ata_vessel_arrival_at_loading_port'],
+    ataLoadBerthed: ['ata_vessel_berthed_at_loading_port'],
+    ataLoadStart: ['ata_vessel_start_loading'],
+    ataLoadComplete: ['ata_vessel_completed_loading'],
+    ataSailed: ['ata_vessel_sailed_from_loading_port'],
+    ataDischArrival: ['ata_vessel_arrive_at_discharge_port'],
+    ataDischBerthed: ['ata_vessel_berthed_at_discharge_port'],
+    ataDischStart: ['ata_vessel_start_discharging'],
+    ataDischComplete: ['ata_vessel_complete_discharge'],
+    /** Kilogram strings. contract_qty "590000.00" is 590 MT. */
+    contractQty: ['contract_qty'],
+    stoQty: ['sto_quantity'],
+    qty: ['quantity_shipped'],
+    qtyDelivered: ['quantity_delivered'],
+    qtyReceived: ['quantity_receive', 'klip_receive_qty'],
+    blQuantity: ['bl_quantity'],
+    outstandingQty: ['outstanding_quantity'],
+    outstandingQtyPlanning: ['outstanding_qty_planning'],
+    /** Empty on staging - 0 of 143 each. Mapped so absence is reportable, not invented. */
+    sfalQty: ['sfal_qty'],
+    sfbdQty: ['sfbd_qty'],
   },
 
   trucking: {

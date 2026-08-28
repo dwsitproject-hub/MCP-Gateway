@@ -165,19 +165,56 @@ export const routes = {
       'return a contract that /contracts will never list.',
   },
 
+  /**
+   * Shipments - the KLIP Shipments page.
+   *
+   * Re-probed 28 Aug 2026 against the live page, because the previous contract declared
+   * three filters KLIP does not honour. Sending a filter KLIP ignores is worse than
+   * having none: buildFilters() marks it "applied upstream" and skips the local pass, so
+   * the tool returns EVERY row and presents it as the filtered set.
+   *
+   * MEASURED, plant=Bontang unless noted (total 428 unfiltered):
+   *   plant=Bontang        143   works
+   *   plant=Nonexistent      0   works - really filters, not a no-op
+   *   contractId=1004031366  4   works
+   *   status=PLANNED        39   works, and equals summary.status.planned exactly
+   *   dateFrom/dateTo        8   works (bare YYYY-MM-DD)
+   *   search=1006019814      4   works - matches the CONTRACT, returning sibling STOs
+   *   stoNumber=100601...  428   IGNORED - unfiltered
+   *   vesselName=EIHO      428   IGNORED - unfiltered
+   *   incoterm=CIF         143   IGNORED
+   *   product=PK           143   IGNORED
+   *   status=BOGUS         143   IGNORED - an unknown status returns everything, so the
+   *                              enum must be enforced here rather than upstream
+   *
+   * STATUS FILTER BUCKETS ARE COARSER THAN THE ROW FIELD. Rows carry ARRIVED_DP (8) and
+   * UNLOADING (5) separately; filtering on EITHER returns all 13. The filter speaks the
+   * page's vocabulary - at-discharge-port - and the row speaks a finer one.
+   *
+   * data.summary IS KLIP'S OWN STATUS BREAKDOWN and is the figure the Shipments page
+   * shows. It must be reported rather than recounted from rows. It also carries
+   * statusVesselNames - the vessels sitting in each status.
+   *
+   * Two facts about that summary a caller has to be told:
+   *   - Its parts do not sum to its own total: for Bontang, total 143 but the eight
+   *     status counts sum to 179. `unplanned` (35) has NO rows behind it - status=UNPLANNED
+   *     returns 0 - and `completed` reads 80 against 79 COMPLETED rows.
+   *   - The page header says 551 shipments where the API reports 428 unfiltered.
+   * Both are open questions with the KLIP team; neither is ours to reconcile silently.
+   *
+   * QUANTITIES ARE KILOGRAMS, as strings: contract_qty "590000.00" is 590 MT. The prior
+   * contract said 'none', which would have published kilogram figures labelled MT.
+   */
   shipments: {
     path: '/shipments',
-    // contractId, stoNumber, vesselName and status are NOT supported upstream - KLIP
-    // ignores them and returns all 348 rows. Omitting them here routes those filters to
-    // buildFilters()'s local[] fallback, which actually applies them. Declaring a
-    // parameter KLIP silently discards is the worst option: the answer looks filtered.
+    // Only what KLIP actually honours. stoNumber and vesselName are deliberately ABSENT
+    // so buildFilters() routes them to its local[] fallback, where they are really applied.
     params: {
       page: 'page',
       limit: 'limit',
       contractId: 'contractId',
-      stoNumber: 'stoNumber',
-      vesselName: 'vesselName',
       plant: 'plant',
+      status: 'status',
       search: 'search',
       dateFrom: 'dateFrom',
       dateTo: 'dateTo',
@@ -185,17 +222,18 @@ export const routes = {
     rowsPath: 'data.shipments',
     totalPagesPath: 'data.pagination.totalPages',
     maxLimit: 500,
-    quantityUnit: 'none',
+    quantityUnit: 'kg',
     dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
     verified: true as const,
-    verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
-    verifiedOn: '2026-08-21',
+    verifiedBy: 'live probe against KLIP staging via the frontend session',
+    verifiedOn: '2026-08-28',
     notes:
-      'Envelope: data.shipments[] + data.summary{} + data.pagination{}. Only 348 rows exist, so the page-size ' +
-      'ceiling is UNMEASURED - 500 is a safe floor, not a measurement. data.summary carries a full status ' +
-      'breakdown (unplanned/preplanned/planned/atLoadingPort/sailed/atDischargePort/completed/cancelled). ' +
-      'Dates take bare YYYY-MM-DD; ISO-datetime and DD/MM/YYYY each 400.',
+      'Envelope: data.shipments[] + data.summary{} + data.pagination{}. data.summary carries the KLIP-computed ' +
+      'status breakdown (unplanned/preplanned/planned/atLoadingPort/sailed/atDischargePort/completed/' +
+      'cancelled) plus statusVesselNames per status - report those, do not recount rows. Row status values ' +
+      'are COMPLETED/PLANNED/UNLOADING/CANCELLED/ARRIVED_DP/LOADING/SAILED. Quantities are kilogram ' +
+      'strings. Dates take bare YYYY-MM-DD; ISO-datetime and DD/MM/YYYY each 400.',
   },
 
   trucking: {
