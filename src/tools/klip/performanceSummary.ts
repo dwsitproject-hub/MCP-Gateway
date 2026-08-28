@@ -89,7 +89,8 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
   title: 'KLIP contract performance summary',
   cap: 1,
   description: describe(
-    'Contract delivery performance as KLIP itself computes it: contract counts, average and maximum ' +
+    'CONTRACT delivery lateness - not vessels. For shipping, vessels, berthing or discharge performance use klip_shipping_performance instead; this tool knows nothing about voyages. ' +
+      'Contract delivery performance as KLIP itself computes it: contract counts, average and maximum ' +
       'days late, logistics and cash cycle times, outstanding quantity for open and closed contracts, ' +
       'and the distribution of lateness across buckets (on time, 1-7 days, 8-14, 15-30, 31-60, 61+). ' +
       'Filterable by plant, supplier, product, incoterm, transport mode, free text and date range, all ' +

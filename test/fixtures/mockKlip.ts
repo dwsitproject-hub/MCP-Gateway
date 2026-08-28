@@ -576,6 +576,80 @@ export function createMockKlip(state: MockState): Express {
     res.json({ success: true, data: { b2bFlags: ['B2B', 'DIRECT'] } });
   });
 
+  /**
+   * Shipping performance. Reproduces three things measured on 28 Aug 2026 that the tool
+   * depends on:
+   *
+   *   - only `plant` filters; vessel_name, status and contract_number are accepted and
+   *     DISCARDED, so a mock that honoured them would hide the local-filter fallback
+   *   - no pagination and no total
+   *   - delay columns are KLIP-computed, and PARTIALLY POPULATED. Row 3 deliberately
+   *     carries no delta at all, so a mean over nulls would be caught.
+   */
+  app.get('/api/shipments/performance', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    const rows = [
+      {
+        id: 'SP-1', shipment_id: '1006019260', sto_number: '1006019260', sto_key: '1006019260',
+        contract_number: '1004030751', contract_ext_no: '006/TJIM-EUP/PK/VI/2026',
+        po_number: '1001030751', supplier: 'TIMURJAYA INDOMAKMUR PT.', product: 'PK',
+        plant_site: 'Bontang', group_name: 'ATIMURJAYA', vessel_name: 'BG. ELANG JAWA 1',
+        charter_type: 'V/C', transport_mode: 'SEA', incoterm: 'CIF', status: 'PLANNED',
+        source_type: '3rd Party', port_of_loading: 'PKS TIMURJAYA INDOMAKMUR',
+        port_of_discharge: 'EUP EDIBLE OIL BONTANG',
+        cargo_readiness_date: '2026-07-20T00:00:00.000Z',
+        contract_qty: 1_200_000, sto_qty: 1_119_820, delivered_qty: 0, received_qty: 0,
+        outstanding_qty: 1_200_000,
+        loading_eta_arrival: '2026-07-10T00:00:00.000Z',
+        loading_ata_arrival: '2026-03-12T00:00:00.000Z',
+        loading_eta_sailed: '2026-07-15T00:00:00.000Z',
+        loading_ata_sailed: '2026-03-13T00:00:00.000Z',
+        discharge_eta_completed: '2026-07-24T00:00:00.000Z',
+        discharge_ata_completed: '2026-03-25T00:00:00.000Z',
+        total_delta_days: -8, loading_delta_eta_etb_days: -1, discharge_delta_eta_etb_days: 0,
+        freight: null, fuel_consumption: null, pump_rate: null, sailing_speed: null, shortage: null,
+      },
+      {
+        id: 'SP-2', shipment_id: '1006019261', sto_number: '1006019261', sto_key: '1006019261',
+        contract_number: '1004030752', po_number: '1001030752', supplier: 'TELEN PT.',
+        product: 'CPO', plant_site: 'Bontang', vessel_name: 'MT. BIO EXPRESS',
+        charter_type: 'T/C', transport_mode: 'SEA', incoterm: 'FOB', status: 'SAILED',
+        source_type: '3rd Party', port_of_loading: 'Dumai', port_of_discharge: 'Belawan',
+        cargo_readiness_date: '2026-08-01T00:00:00.000Z',
+        contract_qty: 3_000_000, sto_qty: 3_000_000, delivered_qty: 0, received_qty: 0,
+        outstanding_qty: 3_000_000,
+        loading_eta_arrival: '2026-08-02T00:00:00.000Z',
+        loading_ata_arrival: '2026-08-05T00:00:00.000Z',
+        loading_eta_sailed: '2026-08-04T00:00:00.000Z',
+        loading_ata_sailed: '2026-08-08T00:00:00.000Z',
+        discharge_eta_completed: '2026-08-10T00:00:00.000Z',
+        discharge_ata_completed: '2026-08-16T00:00:00.000Z',
+        total_delta_days: 6, loading_delta_eta_etb_days: 3, discharge_delta_eta_etb_days: 4,
+        freight: null, fuel_consumption: null, pump_rate: null, sailing_speed: null, shortage: null,
+      },
+      {
+        // No delay figures at all. Unmeasured, NOT on time - the distinction the tool
+        // exists to preserve, and the row that catches a mean taken over nulls.
+        id: 'SP-3', shipment_id: '1006019262', sto_number: null, sto_key: '1006019262',
+        contract_number: '1004030753', po_number: '1001030753', supplier: 'PATIWARE PT.',
+        product: 'CPO', plant_site: 'TJP', vessel_name: null,
+        charter_type: null, transport_mode: 'SEA', incoterm: 'LCO', status: 'PLANNED',
+        source_type: '3rd Party', port_of_loading: 'Sintang', port_of_discharge: 'Belawan',
+        cargo_readiness_date: null,
+        contract_qty: 500_000, sto_qty: 0, delivered_qty: 0, received_qty: 0,
+        outstanding_qty: 500_000,
+        loading_eta_arrival: null, loading_ata_arrival: null,
+        loading_eta_sailed: null, loading_ata_sailed: null,
+        discharge_eta_completed: null, discharge_ata_completed: null,
+        total_delta_days: null, loading_delta_eta_etb_days: null, discharge_delta_eta_etb_days: null,
+        freight: null, fuel_consumption: null, pump_rate: null, sailing_speed: null, shortage: null,
+      },
+    ];
+    const { plant } = req.query as Record<string, string | undefined>;
+    const out = plant === undefined ? rows : rows.filter((r) => r.plant_site.toLowerCase() === plant.toLowerCase());
+    res.json({ success: true, data: out });
+  });
+
   app.get('/api/oil-loss', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     res.json({

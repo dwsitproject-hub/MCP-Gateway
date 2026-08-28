@@ -400,6 +400,51 @@ export const routes = {
     notes: 'Two values: B2B, DIRECT.',
   },
 
+  /**
+   * Shipping performance - the KLIP Shipping Performance page. Planned against actual at
+   * every port milestone, per shipment.
+   *
+   * Probed 28 Aug 2026. { success, data[] }, 370 rows, NO pagination.
+   *
+   * KLIP COMPUTES THE DELTAS ITSELF. loading_delta_eta_etb_days,
+   * discharge_delta_etb_etc_days, total_delta_days and the ata_* variants are all
+   * KLIP's arithmetic. We report those rather than subtracting timestamps ourselves,
+   * for the same reason klip_outstanding stopped computing outstanding.
+   *
+   * FILTERS: only `plant` is applied. vessel_name, status, contract_number and limit are
+   * accepted and DISCARDED - each returns all 370 rows. scope=filtered is not needed
+   * here; plant narrows without it.
+   *
+   * COVERAGE IS THIN AND UNEVEN, which is the main thing a caller must be told:
+   *   total_delta_days        137 of 370
+   *   ata_total_delta_days    164 of 370
+   *   loading_ata_arrival     171 of 370
+   *   discharge_ata_completed  90 of 370
+   * An average over these is an average over a third of the fleet, not the fleet.
+   *
+   * ALWAYS EMPTY on staging: freight, fuel_consumption, pump_rate, sailing_speed
+   * (0 of 370) and shortage (2 of 370). The page has columns for them.
+   *
+   * Quantities follow the same kilogram convention as everywhere else in KLIP -
+   * contract_qty 1200000 for a 1,200 MT barge cargo.
+   */
+  shippingPerformance: {
+    path: '/shipments/performance',
+    // Only plant. Sending the others would imply a control the caller does not have.
+    params: { plant: 'plant' },
+    rowsPath: 'data',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'kg',
+    dateFormat: 'unknown' as const,
+    authMiddleware: 'bearerAuth',
+    verified: false,
+    notes:
+      'GET /api/shipments/performance. Backs the Shipping Performance page. No pagination and no total, ' +
+      'so completeness cannot be asserted. Delta fields are KLIP-computed; do not recompute from the ' +
+      'ETA/ATA pairs. Milestone coverage ranges from 90 to 171 of 370 rows.',
+  },
+
   oilLoss: {
     path: '/oil-loss',
     // No pagination parameters are advertised. Sending page/limit would imply a control

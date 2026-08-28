@@ -216,6 +216,76 @@ export const fields = {
     gainLossPercentage: ['gain_loss_percentage'],
   },
 
+  /**
+   * Shipping performance. Names read from a live payload on 28 Aug 2026, so these are
+   * exact rather than candidates.
+   *
+   * The delta fields are KLIP's own arithmetic over the ETA/ATA pairs. We surface them
+   * and do not subtract timestamps ourselves - a second calculation would be a second
+   * answer, which is the thing this connector keeps removing.
+   */
+  shippingPerformance: {
+    id: ['id'],
+    shipmentId: ['shipment_id'],
+    stoNumber: ['sto_number', 'sto_key'],
+    operationId: ['operation_id'],
+    contractNumber: ['contract_number', 'contract_ext_no'],
+    poNumber: ['po_number'],
+    supplier: ['supplier'],
+    product: ['product'],
+    plant: ['plant_site'],
+    groupName: ['group_name'],
+    vesselName: ['vessel_name'],
+    charterType: ['charter_type'],
+    transportMode: ['transport_mode'],
+    incoterm: ['incoterm'],
+    status: ['status'],
+    sourceType: ['source_type'],
+    loadingPort: ['port_of_loading', 'loading_port', 'vlp_loading_port_name'],
+    dischargePort: ['port_of_discharge', 'discharge_port', 'vlp_discharge_port_name'],
+    cargoReadiness: ['cargo_readiness_date'],
+    contractQty: ['contract_qty'],
+    stoQty: ['sto_qty'],
+    deliveredQty: ['delivered_qty'],
+    receivedQty: ['received_qty'],
+    outstandingQty: ['outstanding_qty'],
+    /** Planned, loading side. */
+    loadEtaArrival: ['loading_eta_arrival'],
+    loadEtaBerthed: ['loading_eta_berthed'],
+    loadEtaStart: ['loading_eta_start'],
+    loadEtaCompleted: ['loading_eta_completed'],
+    loadEtaSailed: ['loading_eta_sailed'],
+    /** Actual, loading side. */
+    loadAtaArrival: ['loading_ata_arrival'],
+    loadAtaBerthed: ['loading_ata_berthed'],
+    loadAtaStart: ['loading_ata_start'],
+    loadAtaCompleted: ['loading_ata_completed'],
+    loadAtaSailed: ['loading_ata_sailed'],
+    /** Planned and actual, discharge side. */
+    dischEtaArrival: ['discharge_eta_arrival'],
+    dischEtaBerthed: ['discharge_eta_berthed'],
+    dischEtaStart: ['discharge_eta_start'],
+    dischEtaCompleted: ['discharge_eta_completed'],
+    dischAtaArrival: ['discharge_ata_arrival'],
+    dischAtaBerthed: ['discharge_ata_berthed'],
+    dischAtaStart: ['discharge_ata_start'],
+    dischAtaCompleted: ['discharge_ata_completed'],
+    /** KLIP-COMPUTED delays, in days. Reported as-is. */
+    totalDeltaDays: ['total_delta_days'],
+    ataTotalDeltaDays: ['ata_total_delta_days'],
+    loadDeltaArrivalToBerth: ['loading_delta_eta_etb_days'],
+    loadDeltaBerthToComplete: ['loading_delta_etb_etc_days'],
+    loadDeltaToReadiness: ['loading_delta_eta_etr_days'],
+    dischDeltaArrivalToBerth: ['discharge_delta_eta_etb_days'],
+    dischDeltaBerthToComplete: ['discharge_delta_etb_etc_days'],
+    /** Empty on staging - 0 of 370. Mapped so their absence is reportable, not invented. */
+    freight: ['freight'],
+    fuelConsumption: ['fuel_consumption'],
+    pumpRate: ['pump_rate'],
+    sailingSpeed: ['sailing_speed'],
+    shortage: ['shortage'],
+  },
+
   sapImport: {
     id: ['id', 'importId', 'import_id', 'batchId'],
     // VERIFIED 2026-08-21. KLIP returns exactly: id, import_date, import_timestamp,

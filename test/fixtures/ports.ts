@@ -22,4 +22,5 @@ export const PORTS = {
   oilLoss: 5197,
   vocabulary: 5198,
   performanceSummary: 5199,
+  shippingPerformance: 5200,
 } as const;
