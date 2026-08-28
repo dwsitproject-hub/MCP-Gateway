@@ -33,11 +33,14 @@ afterAll(async () => {
 });
 
 describe('the summary itself', () => {
-  it('reads the aggregate object, cycle times and lateness buckets', async () => {
+  it('reads the LATE cohort, cycle times and lateness buckets', async () => {
+    // `summary` is the late cohort, not every contract - its count equals
+    // open_late + close_late. Named all_contracts here originally, which is the
+    // misreading the field name itself invited.
     const out = await tool.handler({} as never, ctx);
     const d = out.data as Record<string, any>;
-    expect(d.all_contracts.count).toBe(254);
-    expect(d.all_contracts.avgLogCycle).toBe(12);
+    expect(d.late_contracts.count).toBe(254);
+    expect(d.late_contracts.avgLogCycle).toBe(12);
     expect(d.lateness_distribution.d61plus.count).toBe(1);
   });
 
@@ -51,7 +54,7 @@ describe('the summary itself', () => {
     const d = out.data as Record<string, any>;
     // The mock narrows only when a working parameter arrives, so a changed count proves
     // the query string was sent rather than built and dropped.
-    expect(d.all_contracts.count).toBe(40);
+    expect(d.late_contracts.count).toBe(40);
     expect(String(d.filters_applied)).toContain('transportMode');
   });
 });
@@ -105,7 +108,7 @@ describe('the scope=filtered gate', () => {
     // Derived, not remembered. Without it KLIP returns the unfiltered YTD figures under
     // the caller's plant filter - company-wide numbers labelled as one plant.
     const out = await tool.handler({ plant: 'TJP' } as never, ctx);
-    expect((out.data as Record<string, any>).all_contracts.count).toBe(40);
+    expect((out.data as Record<string, any>).late_contracts.count).toBe(40);
     const q = state.requests.filter((r) => r.path.includes('late-performance')).pop();
     expect(q?.query.scope).toBe('filtered');
     expect(q?.query.plant).toBe('TJP');
@@ -119,7 +122,7 @@ describe('the scope=filtered gate', () => {
       ['search', 'anything'],
     ] as const) {
       const out = await tool.handler({ [key]: value } as never, ctx);
-      expect((out.data as Record<string, any>).all_contracts.count).toBe(40);
+      expect((out.data as Record<string, any>).late_contracts.count).toBe(40);
     }
   });
 
@@ -138,5 +141,21 @@ describe('the scope=filtered gate', () => {
     expect(Object.keys(tool.inputShape)).not.toContain('status');
     const out = await tool.handler({} as never, ctx);
     expect(String((out.data as Record<string, any>).filters_unavailable)).toMatch(/does not narrow/i);
+  });
+});
+
+describe('the two cohorts are kept apart', () => {
+  it('names the late cohort as late, not as all contracts', async () => {
+    const out = await tool.handler({} as never, ctx);
+    const d = out.data as Record<string, any>;
+    expect(d.late_contracts).not.toBeNull();
+    expect(d.all_contracts).toBeUndefined();
+  });
+
+  it('reports every contract separately, split by status', async () => {
+    const out = await tool.handler({} as never, ctx);
+    const d = out.data as Record<string, any>;
+    expect(d.all_contracts_by_status).not.toBeNull();
+    expect(String(d.cohort_note)).toMatch(/Never read the first as a plant total/i);
   });
 });

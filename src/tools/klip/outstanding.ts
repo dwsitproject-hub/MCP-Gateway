@@ -105,8 +105,8 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
       'the listed rows do not add up to the total and are not meant to. ' +
       'For a per-incoterm split, call once per incoterm: the parts sum to the whole exactly ' +
       '(measured for Bontang/CPO on 27 Aug 2026, matching to three decimals). ' +
-      'klip_contract_count is KLIP\'s own figure and its basis is unconfirmed - report it if asked, ' +
-      'but do not compute with it.',
+      'late_contracts counts LATE contracts only - it equals open_late + close_late. It is NOT the ' +
+      'number of contracts at the plant and must never be reported as one.',
   ),
   inputShape,
 
@@ -192,11 +192,40 @@ export const outstanding: ToolDefinition<typeof inputShape> = {
           ? null
           : {
               // KLIP holds kilograms; converted once, here. Verified against the KLIP page.
-              open_outstanding_mt: kgToMt(card?.openOutstandingQty ?? whole?.openOutstandingQty ?? null),
+              /**
+               * From statusCardSummary DELIBERATELY, not from summary.
+               *
+               * Both carry openOutstandingQty and they differ by roughly 5x - for
+               * Bontang/CPO, 129,228,678 against 24,245,217. `summary` covers the LATE
+               * cohort; statusCardSummary covers every open contract, and is the figure
+               * that reconciles with the KLIP Contract Performance page.
+               *
+               * No ?? fallback to summary: silently substituting the late-only figure
+               * would understate outstanding by 80% with nothing in the response saying
+               * the meaning had changed.
+               */
+              open_outstanding_mt: kgToMt(card?.openOutstandingQty ?? null),
               close_outstanding_mt: kgToMt(whole?.closeOutstandingQty ?? null),
-              // KLIP's count, and therefore THE count. No qualifier needed now that
-              // nothing here produces a rival figure.
-              contracts: whole?.count ?? null,
+              /**
+               * LATE contracts, not all contracts. Established 28 Aug 2026.
+               *
+               * summary.count equals open_late + close_late exactly, across five
+               * independent partitions of Bontang/CPO:
+               *
+               *   unfiltered   36 + 360 = 396
+               *   FOB          13 + 120 = 133
+               *   LCO           4 +  79 =  83
+               *   FRC          17 + 161 = 178
+               *   CIF           2 +   0 =   2
+               *
+               * Which is what the endpoint's own name says: /late-performance. `summary`
+               * describes the late cohort; `statusCardSummary` describes everything split
+               * by status. We had this labelled as a plain contract count, so a reader
+               * would have understated the book by roughly half - 396 against 933 rows -
+               * and that unexplained gap was itself the reason we told people not to
+               * trust the figure.
+               */
+              late_contracts: whole?.count ?? null,
               open_on_time: card?.openOnTimeCount ?? null,
               open_late: card?.openLateCount ?? null,
               close_on_time: card?.closeOnTimeCount ?? null,

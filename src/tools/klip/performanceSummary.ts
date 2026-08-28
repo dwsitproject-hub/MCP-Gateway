@@ -142,10 +142,22 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
     const data: Record<string, unknown> = {
       scope: body.scope ?? null,
       period: body.ytd_range ?? null,
-      all_contracts: body.summary ?? null,
+      // NOT all contracts: `summary` describes the LATE cohort. Its count equals
+      // open_late + close_late exactly across five partitions of Bontang/CPO, which is
+      // what /late-performance implies. Naming it all_contracts invited the misreading
+      // it duly produced.
+      late_contracts: body.summary ?? null,
       on_track_only: body.onTrackSummary ?? null,
-      by_status: body.statusCardSummary ?? null,
+      // Every contract, split by status. Its openOutstandingQty is the figure that
+      // reconciles with the KLIP Contract Performance page - roughly 5x the one under
+      // late_contracts, which counts only late contracts.
+      all_contracts_by_status: body.statusCardSummary ?? null,
       lateness_distribution: body.distribution ?? null,
+      cohort_note:
+        'late_contracts covers only contracts KLIP judges LATE - its count equals open_late + close_late. ' +
+        'all_contracts_by_status covers every contract. The two report different openOutstandingQty ' +
+        'figures for that reason, roughly 5x apart, and only the second reconciles with the KLIP ' +
+        'Contract Performance page. Never read the first as a plant total.',
       computed_by:
         'KLIP, over the whole matching dataset with no pagination. These follow the KLIP outstanding ' +
         'rules, which govern by the 24 August ruling. klip_outstanding computes its own figures from ' +
