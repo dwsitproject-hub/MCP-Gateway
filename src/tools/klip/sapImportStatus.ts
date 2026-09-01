@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { walk } from './../../adapters/klip/paginate.js';
 import { routes } from './../../adapters/klip/routes.js';
 import { fields, pickNumber, pickString, type Row } from './../../adapters/klip/fields.js';
-import { toWibIso, isImplausiblyFuture } from './../../adapters/klip/normalize.js';
+import { toWibIso } from './../../adapters/klip/normalize.js';
 import * as cache from './../../core/cache.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
 
@@ -83,14 +83,24 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
         // truncated now reports COVERAGE only; the display bound is stated here instead.
         rows_shown: imports.length,
         matching_rows: walked.rows.length,
-        // A completed import cannot have finished in the future. Surfacing this beats
-        // reporting the timestamp straight, and beats silently adjusting it.
-        clock_warning: imports.some((i) => isImplausiblyFuture(i.started_at))
-          ? 'KLIP reported a timestamp in the FUTURE for at least one import, so the times below are ' +
-            'not reliable. The import records themselves (status, row counts) are unaffected. ' +
-            'Do not use these timestamps to judge whether a run is recent; check the KLIP import ' +
-            'screen instead, and report the discrepancy to the KLIP team.'
-          : undefined,
+        /**
+         * The future-timestamp warning is GONE, at the KLIP team's request on 28 Aug 2026,
+         * because they found and repaired what caused it.
+         *
+         * The ApsaraDB RDS timezone parameter was Asia/Jakarta from 13 August, so
+         * CURRENT_TIMESTAMP wrote the server's local wall clock into naive columns - 132
+         * columns across 64 tables, silent for two weeks and invisible because ordering
+         * within the new era still looked correct. Repaired 27 August: the parameter set
+         * to UTC, then seven hours subtracted from clock-written columns in the affected
+         * window, 329,086 row-updates across 51 columns. Every maximum now sits behind
+         * the clock.
+         *
+         * So the warning would fire on nothing, and a warning that fires on nothing is
+         * how people learn to skip the ones that matter. Timestamps are reported as-is.
+         *
+         * Note this is unrelated to the midnight-Z DATE columns elsewhere in KLIP - those
+         * are date-only values with no fault to repair. See toDateOnly.
+         */
         note:
           imports.length === 0
             ? 'KLIP returned no import records. This is an empty result, not a failed import.'

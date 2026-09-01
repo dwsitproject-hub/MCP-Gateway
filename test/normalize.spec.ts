@@ -66,14 +66,17 @@ describe('basis selection', () => {
     expect(basisFor('  Loco ')).toBe('shipped');
   });
 
-  it('maps Franco and CIF to the received basis', () => {
+  it('maps Franco, CIF and CFR to the received basis', () => {
     expect(basisFor('Franco')).toBe('received');
     expect(basisFor('CIF')).toBe('received');
+    // Named explicitly in KLIP's SQL. We had it as unclassified and were excluding it.
+    expect(basisFor('CFR')).toBe('received');
   });
 
-  it('refuses to guess a basis for an unmapped incoterm', () => {
-    for (const value of ['CFR', 'DAP', 'Ex-Works', '', '   ', null, undefined]) {
-      expect(basisFor(value)).toBeNull();
+  it('sends everything KLIP does not name to its ELSE rule, rather than refusing', () => {
+    // KLIP has no unclassified incoterm: ELSE COALESCE(NULLIF(receive, 0), delivery).
+    for (const value of ['DAP', 'Ex-Works', '', '   ', null, undefined]) {
+      expect(basisFor(value)).toBe('received_else_shipped');
     }
   });
 });
@@ -141,12 +144,23 @@ describe('outstanding() - Incoterm x status matrix', () => {
     }
   });
 
-  it('excludes a line with an unmapped incoterm rather than defaulting to shipped', () => {
+  it('counts CFR on the received basis, as KLIP does', () => {
     const r = outstanding(line({ incoterm: 'CFR' }));
-    expect(r.basis).toBeNull();
-    expect(r.outstanding_kg).toBeNull();
-    expect(r.countable).toBe(false);
-    expect(r.data_quality).toContain('unknown_incoterm');
+    expect(r.basis).toBe('received');
+    expect(r.countable).toBe(true);
+    expect(r.data_quality).not.toContain('incoterm_fallback_basis');
+  });
+
+  it('applies KLIP\'s ELSE rule to an unnamed incoterm: received if non-zero, else shipped', () => {
+    const withReceive = outstanding(line({ incoterm: 'DAP', shipped_kg: 100, received_kg: 400 }));
+    expect(withReceive.basis).toBe('received_else_shipped');
+    expect(withReceive.basis_qty_kg).toBe(400);
+    expect(withReceive.countable).toBe(true);
+    expect(withReceive.data_quality).toContain('incoterm_fallback_basis');
+
+    // NULLIF(receive, 0) - a zero receive falls through to the shipped quantity.
+    const zeroReceive = outstanding(line({ incoterm: 'DAP', shipped_kg: 100, received_kg: 0 }));
+    expect(zeroReceive.basis_qty_kg).toBe(100);
   });
 
   it('propagates a null Qty PO as null, never as zero', () => {
@@ -201,17 +215,19 @@ describe('aggregation', () => {
   });
 
   it('excludes null lines from the total and counts them', () => {
+    // The DAP line is now COUNTED on KLIP's ELSE rule rather than excluded, so only the
+    // missing-Qty-PO line drops out.
     const lines = [
       outstanding(line({ contract_id: 'A' })),
       outstanding(line({ contract_id: 'B', qty_po_kg: null })),
       outstanding(line({ contract_id: 'C', incoterm: 'DAP' })),
     ];
     const totals = aggregateOutstanding(lines);
-    expect(totals.outstanding_mt).toBe(600);
+    expect(totals.outstanding_mt).toBe(1300);
     expect(totals.contracts).toBe(3);
-    expect(totals.excluded_lines).toBe(2);
+    expect(totals.excluded_lines).toBe(1);
     expect(totals.data_quality_counts.missing_qty_po).toBe(1);
-    expect(totals.data_quality_counts.unknown_incoterm).toBe(1);
+    expect(totals.data_quality_counts.incoterm_fallback_basis).toBe(1);
   });
 
   it('returns null totals rather than zero when nothing was countable', () => {

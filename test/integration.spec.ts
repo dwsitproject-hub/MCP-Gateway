@@ -189,7 +189,13 @@ describe('klip_outstanding correctness (M1)', () => {
     const data = outcome.data as Record<string, unknown>;
 
     // Flagged by name in data_quality, which is where a row-level concern belongs.
-    expect(envelope.data_quality?.unknown_incoterm).toBe(1);
+    //
+    // The note changed meaning on 28 Aug 2026. KLIP supplied its basis SQL, which has an
+    // ELSE branch - so an incoterm it does not name is not unclassified, it is on the
+    // fallback rule, and the contract is COUNTED. Excluding it had been dropping rows
+    // with no movement at all: exactly the contracts at 100% outstanding.
+    expect(envelope.data_quality?.incoterm_fallback_basis).toBe(1);
+    expect(envelope.data_quality?.unknown_incoterm).toBeUndefined();
 
     /**
      * Everything about the connector's OWN cross-check is now logged rather than

@@ -68,14 +68,23 @@ describe('claims the tool must not make', () => {
     expect(m.quantity_dispatched).toBe(30_000);
   });
 
-  it('reports total_rows as null rather than implying completeness', async () => {
+  it('reports total_rows as null, and says the rows are LOSSES rather than movements', async () => {
+    // KLIP confirmed on 28 Aug 2026 that this endpoint applies no cap, no pagination and
+    // reads no query parameters - so the set is complete. What it is NOT is all
+    // movements: the query ends `AND qty_receive_resolved < qty_delivery_resolved`, so
+    // every row is a movement that lost oil. A rate built on this denominator answers a
+    // different question from the one it appears to answer, which is the more dangerous
+    // of the two limitations and the one the response has to lead with.
     const out = await tool.handler({ limit: 20 } as never, ctx);
     expect(out.coverage?.total_rows).toBeNull();
     expect(out.coverage?.total_pages).toBeNull();
-    expect(String((out.data as { coverage_note: string }).coverage_note)).toMatch(/possibly incomplete/i);
+    const data = out.data as { coverage_note: string; population_note: string };
+    expect(String(data.population_note)).toMatch(/LOSS MOVEMENTS ONLY/);
+    expect(String(data.population_note)).toMatch(/loss-population denominator/i);
+    expect(String(data.coverage_note)).toMatch(/no cap, no pagination/i);
   });
 
-  it('does not surface quantity_sent while its provenance is unconfirmed', async () => {
+  it('does not surface quantity_sent - confirmed an alias of the delivered quantity', async () => {
     // Present and populated on this endpoint, unlike /trucking. Reporting a weighbridge
     // figure on the strength of one payload is the mistake we objected to in KLIP-004.
     const out = await tool.handler({ limit: 20 } as never, ctx);

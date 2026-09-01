@@ -17,10 +17,25 @@
  * row-level quantity_* fields carry no suffix either way. Nothing is converted on a
  * guess - being wrong here is a 1000x error, and the KLIP team have been asked.
  *
- * quantity_sent IS PRESENT here, which contradicts KLIP-004's finding that sent weight
- * exists nowhere. It is deliberately not surfaced until KLIP confirms whether it is a
- * real weighbridge-out figure and how many rows carry it. Reporting a weight on the
- * strength of one row would repeat the mistake we objected to.
+ * THE ENDPOINT RETURNS LOSS ROWS ONLY. Confirmed by the KLIP team on 28 Aug 2026: the
+ * query ends `AND qty_receive_resolved < qty_delivery_resolved`. So the rows are
+ * movements that LOST oil, not all movements, and any rate built on them has a
+ * loss-population denominator. This is stated in every response, because "3,305
+ * movements" reads as the fleet unless something says otherwise.
+ *
+ * quantity_sent IS PRESENT here and was withheld pending confirmation, on the grounds
+ * that KLIP had not declared its provenance. Confirmed 28 Aug 2026, and the reason is
+ * worse than an undeclared field - oilLossQuerySql.ts emits the same expression twice:
+ *
+ *   qty_delivery_resolved AS quantity_delivery   -- line 292
+ *   qty_receive_resolved  AS quantity_received   -- line 293
+ *   qty_delivery_resolved AS quantity_sent       -- line 294
+ *
+ * It is a legacy alias, not a measurement. Surfacing it would have reported the
+ * delivered quantity a second time under a name meaning something else, and it would
+ * have looked right - fully populated and correctly scaled. It stays unsurfaced, now
+ * for a settled reason rather than a pending one. KLIP-004 stands: sent weight does not
+ * exist in the pipeline.
  */
 import { z } from 'zod';
 import { walk } from './../../adapters/klip/paginate.js';
@@ -113,9 +128,16 @@ export const oilLoss: ToolDefinition<typeof inputShape> = {
         'Quantities and gain/loss are reported exactly as KLIP returns them. The unit of the ' +
         'row-level figures is NOT confirmed - KLIP mixes kilograms and tonnes on this endpoint and ' +
         'labels only some of them. Do not convert these figures or describe them as MT.',
+      population_note:
+        'THESE ARE LOSS MOVEMENTS ONLY. KLIP filters this endpoint to rows where the received quantity ' +
+        'is less than the delivered quantity, so it returns movements that lost oil - never the full ' +
+        'set of movements. Any rate computed from these rows has a loss-population denominator: it can ' +
+        'answer "how large were the losses" but never "what share of movements lost oil". Confirmed by ' +
+        'the KLIP team, 28 Aug 2026.',
       coverage_note:
-        'KLIP does not paginate this endpoint and reports no total, so this connector cannot tell ' +
-        'whether every movement was returned. Treat the set as possibly incomplete.',
+        'Within that loss population the set is complete: KLIP applies no cap, no pagination and reads ' +
+        'no query parameters on this endpoint - its controller signature takes no request - so what is ' +
+        'returned is every loss row. It reports no total, which is why total_rows is null.',
       filters_applied_locally:
         'Filters were applied by this connector after fetching, because KLIP advertises no query ' +
         'parameters here. A filter matching nothing means nothing matched in the rows retrieved.',

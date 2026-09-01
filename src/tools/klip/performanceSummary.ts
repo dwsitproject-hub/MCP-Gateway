@@ -154,11 +154,32 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
       // late_contracts, which counts only late contracts.
       all_contracts_by_status: body.statusCardSummary ?? null,
       lateness_distribution: body.distribution ?? null,
+      /**
+       * Three populations, not two. Explained by the KLIP team on 28 Aug 2026, and the
+       * third one is why our counts looked incoherent:
+       *
+       *   933  all contracts matching the filter
+       *   622  those with a resolvable trade cycle - the four card counts
+       *   396  summary.count, the LATE subset of those 622
+       *
+       * Contracts with no resolvable trade cycle are in neither the late nor the on-track
+       * counter; they go to unscheduledTree and distribution.noData.
+       *
+       * AND THE QUANTITY DOES NOT MATCH THE COUNT. statusCardSummary.openOutstandingQty
+       * accumulates at latePerformance.service.ts:1327, which runs BEFORE the
+       * `tradeCycle == null` exit at :1378 - so the quantity covers every open contract,
+       * unscheduled ones included, while the count beside it covers only the late subset.
+       * Our quantities reconcile with the page; the counts next to them describe a
+       * narrower population. That is why a CIF partition reads "2 contracts" for a bucket
+       * holding far more than two.
+       */
       cohort_note:
-        'late_contracts covers only contracts KLIP judges LATE - its count equals open_late + close_late. ' +
-        'all_contracts_by_status covers every contract. The two report different openOutstandingQty ' +
-        'figures for that reason, roughly 5x apart, and only the second reconciles with the KLIP ' +
-        'Contract Performance page. Never read the first as a plant total.',
+        'THE COUNT AND THE QUANTITY DESCRIBE DIFFERENT POPULATIONS. late_contracts counts only contracts ' +
+        'KLIP judges late (open_late + close_late), while openOutstandingQty under all_contracts_by_status ' +
+        'covers EVERY open contract including those with no resolvable trade cycle, which are in neither ' +
+        'the late nor the on-track counter. Quote the quantity as the plant total - it reconciles with the ' +
+        'KLIP Contract Performance page - and never divide it by the count beside it, or describe that ' +
+        'count as the number of contracts holding that quantity.',
       computed_by:
         'KLIP, over the whole matching dataset with no pagination. These follow the KLIP outstanding ' +
         'rules, which govern by the 24 August ruling. klip_outstanding computes its own figures from ' +
@@ -168,10 +189,26 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
         Object.keys(upstream).length === 0
           ? 'None. These are company-wide figures for the year to date.'
           : `Applied by KLIP across the whole matching dataset: ${Object.keys(upstream).join(', ')}.`,
+      /**
+       * Corrected 28 Aug 2026. We had recorded that KLIP's status filter "does not narrow
+       * the result". It does - we misread it twice over.
+       *
+       * First, it is value-sensitive: contract.controller.ts:1215 accepts exactly `Open`,
+       * `ACTIVE`, `Close` and `CLOSE`, plus `All Status`/`all` meaning no filter. Anything
+       * else, lowercase `open` included, falls to an exact-equality branch that matches
+       * nothing and returns zeros.
+       *
+       * Second, statusCardSummary is ALREADY split into open and close cards. Filtering to
+       * Open leaves the open pair unchanged and zeroes the close pair - so if you watch the
+       * open counts, "unchanged" is exactly what a working filter looks like.
+       *
+       * Still not offered, because the split cards answer the same question without a
+       * parameter whose wrong casing silently returns zeros.
+       */
       filters_unavailable:
-        'No contract-status filter: KLIP accepts one here but it does not narrow the result, so it is ' +
-        'not offered. The figures are already split into open and closed, which covers the same ' +
-        'question.',
+        'No contract-status filter is offered here, because all_contracts_by_status already splits every ' +
+        'figure into open and closed. KLIP does have one and it works, but only for the exact strings ' +
+        'Open, ACTIVE, Close and CLOSE - any other casing returns zeros rather than an error.',
       units_note:
         'Quantity figures are reported exactly as KLIP returns them. The unit is NOT confirmed and no ' +
         'conversion has been applied. Do not describe them as MT or kg.',

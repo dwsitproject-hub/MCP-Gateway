@@ -111,10 +111,24 @@ export function toDateOnly(input: string | Date | null | undefined): string | nu
 // Incoterm-driven outstanding quantity
 // ---------------------------------------------------------------------------
 
-export type OutstandingBasis = 'shipped' | 'received';
+/**
+ * How a contract's delivered-so-far quantity is measured.
+ *
+ * `received_else_shipped` is KLIP's ELSE branch, verbatim:
+ * COALESCE(NULLIF(receive, 0), delivery) - received when it is non-zero, shipped
+ * otherwise. It applies to blank incoterms and to anything KLIP does not name.
+ */
+export type OutstandingBasis = 'shipped' | 'received' | 'received_else_shipped';
 
 export type DataQualityNote =
+  /**
+   * No longer emitted. Kept in the union so an older cached envelope still types.
+   * CFR and blank were the only incoterms that produced it, and both are now
+   * classified - see basisFor.
+   */
   | 'unknown_incoterm'
+  /** KLIP's ELSE rule was used: received if non-zero, else shipped. */
+  | 'incoterm_fallback_basis'
   | 'unknown_status'
   | 'missing_qty_po'
   | 'missing_basis_quantity'
@@ -180,12 +194,26 @@ function canon(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-export function basisFor(incoterm: string | null | undefined): OutstandingBasis | null {
+/**
+ * Mirrors KLIP's sqlContractActualQtySubtractedCase exactly, including its ELSE.
+ *
+ * This used to return null for anything unnamed, and the caller then EXCLUDED the
+ * contract from outstanding rather than assume a basis. That was the right instinct
+ * with an unknown rule and the wrong answer once the rule was known: KLIP has no
+ * unclassified incoterm. Its ELSE branch is a real rule, so a blank incoterm is
+ * counted rather than dropped - and dropping it removed contracts with no movement
+ * at all, which are exactly the ones sitting at 100% outstanding.
+ *
+ * Never returns null now. The signature keeps its nullable return only so existing
+ * callers compile; every branch is total.
+ */
+export function basisFor(incoterm: string | null | undefined): OutstandingBasis {
   const key = canon(incoterm);
-  if (key === null) return null;
-  if ((enums.shippedBasisIncoterms as readonly string[]).includes(key)) return 'shipped';
-  if ((enums.receivedBasisIncoterms as readonly string[]).includes(key)) return 'received';
-  return null;
+  if (key !== null) {
+    if ((enums.shippedBasisIncoterms as readonly string[]).includes(key)) return 'shipped';
+    if ((enums.receivedBasisIncoterms as readonly string[]).includes(key)) return 'received';
+  }
+  return 'received_else_shipped';
 }
 
 export type StatusClass = 'open' | 'completed' | 'zeroed' | 'unknown';
@@ -242,13 +270,18 @@ export function outstanding(line: ContractLineInput): OutstandingLine {
 
   if (statusClass === 'unknown') notes.push('unknown_status');
 
-  if (basis === null) {
-    // No defensible basis: exclude rather than assume "shipped".
-    notes.push('unknown_incoterm');
-    return { ...base, basis_qty_kg: null, outstanding_kg: null, countable: false, data_quality: notes };
-  }
+  // KLIP's ELSE rule, verbatim: received when non-zero, shipped otherwise. Flagged so
+  // a reader can see which contracts leant on the fallback rather than a named incoterm.
+  if (basis === 'received_else_shipped') notes.push('incoterm_fallback_basis');
 
-  const basisQty = basis === 'shipped' ? shipped : received;
+  const basisQty =
+    basis === 'shipped'
+      ? shipped
+      : basis === 'received'
+        ? received
+        : received !== null && received !== 0
+          ? received
+          : shipped;
 
   if (qtyPo === null) notes.push('missing_qty_po');
   if (basisQty === null) notes.push('missing_basis_quantity');

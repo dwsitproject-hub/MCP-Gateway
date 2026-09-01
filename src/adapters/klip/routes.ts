@@ -259,10 +259,27 @@ export const routes = {
     verified: true as const,
     verifiedBy: 'live probe against KLIP staging 172.28.92.57:5001',
     verifiedOn: '2026-08-21',
+    /**
+     * dateFrom/dateTo FILTER THE CONTRACT DATE, NOT THE OPERATION DATE. Deliberate, and
+     * confirmed by the KLIP team on 28 Aug 2026 from trucking.controller.ts:1055:
+     *
+     *   // Dashboard baseline filters by CONTRACT DATE (YTD). Keep calendar filters
+     *   // aligned: dateFrom/dateTo apply to contracts.contract_date.
+     *
+     * So dateFrom=2026-06-01&dateTo=2026-06-07 asks "operations on contracts DATED in
+     * that week", and an operation that ran on 13 June is a correct answer to it. We had
+     * this recorded as a possible mismatch; it is not one. The range is on a field we do
+     * not surface, which is why it looked wrong from outside.
+     *
+     * An operation-date filter does not exist. KLIP has offered to ADD one rather than
+     * redefine this parameter - redefining it would silently desynchronise the Trucking
+     * calendar from the dashboard's YTD baseline. We owe them a parameter name.
+     */
     notes:
       'Envelope: data.truckingOperations[] + data.summary{} + data.pagination{}. SILENTLY CLAMPS at 500: ' +
       'limit=1000 returns 500 rows with no error, against 5824 total (review H5). data.summary.outstandingQty ' +
-      'is denominated in KG (frcKg/lcoKg/totalKg) while contracts report MT - row-level unit unconfirmed.',
+      'is denominated in KG (frcKg/lcoKg/totalKg) while contracts report MT - row-level unit unconfirmed. ' +
+      'dateFrom/dateTo filter contracts.contract_date, NOT the trucking operation date.',
   },
 
   quality: {
@@ -420,7 +437,8 @@ export const routes = {
       'SIX values: Blank, CFR, CIF, FOB, FRC, LCO. A 200-row contract sample only ever showed ' +
       'FOB/FRC/LCO, so sampling understated the domain - exactly why the canonical list matters. ' +
       'CFR and Blank are NOT classified by our outstanding-basis rules, so those contracts are ' +
-      'currently excluded from outstanding totals as unknown_incoterm. Classification queried with KLIP.',
+      'CFR is RECEIVED-basis and blank takes KLIP\'s fallback rule - answered by the KLIP team on ' +
+      '28 Aug 2026 from their own SQL. Neither is excluded any more.',
   },
 
   filterOptionsB2bFlags: {
@@ -602,8 +620,26 @@ export const enums = {
    * Incoterms whose outstanding basis is quantity RECEIVED.
    * KLIP spells Franco as FRC - confirmed by data.summary.outstandingQty on
    * /trucking, which buckets outstanding volume into frcKg and lcoKg.
+   *
+   * CFR added 28 Aug 2026 from KLIP's own SQL, which the KLIP team quoted from
+   * backend/src/utils/sapIncotermMetrics.ts (sqlContractActualQtySubtractedCase):
+   *
+   *   WHEN inc IN ('FRC', 'CIF', 'CFR') THEN receive
+   *   WHEN inc IN ('LCO', 'FOB')        THEN delivery
+   *   ELSE COALESCE(NULLIF(receive, 0), delivery)
+   *
+   * We had CFR as unclassified and were EXCLUDING those contracts from outstanding.
+   * It is named explicitly upstream and does not fall through. The ELSE branch is
+   * modelled separately - see receivedElseShippedFallback below.
    */
-  receivedBasisIncoterms: ['frc', 'franco', 'cif'],
+  receivedBasisIncoterms: ['frc', 'franco', 'cif', 'cfr'],
+  /**
+   * KLIP's ELSE branch, for every incoterm it does not name - blank included.
+   *
+   * Not a third list but a third RULE: take received when it is non-zero, otherwise
+   * take shipped. Recorded here so the rule has one home and reference can publish it.
+   */
+  receivedElseShippedFallback: 'COALESCE(NULLIF(receive, 0), delivery)',
   shipmentStatuses: [
     'unplanned', 'preplanned', 'planned', 'atloadingport',
     'sailed', 'atdischargeport', 'completed', 'cancelled',

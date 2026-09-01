@@ -198,6 +198,9 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
         ata_discharge_arrival: toDateOnly(pickString(row, f.ataDischArrival)),
         ata_discharge_complete: toDateOnly(pickString(row, f.ataDischComplete)),
         shipped_qty_mt: kgToMt(pickNumber(row, f.qty)),
+        // contract_qty_mt and outstanding_qty_mt are the CONTRACT's figures, repeated
+        // on every STO row of that contract. sto_qty_mt is this shipment's own share and
+        // is the only one of the three that may be summed. See not_summable below.
         contract_qty_mt: kgToMt(pickNumber(row, f.contractQty)),
         sto_qty_mt: kgToMt(pickNumber(row, f.stoQty)),
         outstanding_qty_mt: kgToMt(pickNumber(row, f.outstandingQty)),
@@ -282,6 +285,23 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
         'Counted over every row matching the filters, not over the capped list above. Cancelled and ' +
         'completed shipments are excluded.',
     };
+
+    /**
+     * Verified on contract 1004031366, 28 Aug 2026: four STOs, each row carrying
+     * contract_qty 1,300,000 kg and outstanding_quantity 1,300,000 kg against a contract
+     * of 1,300 MT. sto_quantity holds the real split (325,000 / 326,630 / 325,000 /
+     * 325,000, summing to 1,301.63 MT). Summing the outstanding column therefore returns
+     * 5,200 MT for a 1,300 MT contract - out by exactly the number of STOs.
+     *
+     * A model handed a column of numbers will add it up. Saying so is the only defence.
+     */
+    data.not_summable =
+      'contract_qty_mt and outstanding_qty_mt are the CONTRACT total, repeated identically on every STO ' +
+      'row belonging to that contract - NOT this shipment\'s share. Adding either column across rows ' +
+      'multiplies the true figure by the number of shipments on each contract; verified at exactly 4x on ' +
+      'a four-STO contract. sto_qty_mt is the per-shipment allocation and is the only one of the three ' +
+      'that may be summed. For a plant or contract outstanding total, use klip_outstanding, which reads ' +
+      'KLIP\'s own aggregate.';
 
     data.milestone_note =
       'Milestones form a ladder with an estimate and an actual at each rung: arrival at the LOADING port, ' +

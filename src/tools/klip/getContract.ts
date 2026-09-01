@@ -8,6 +8,32 @@
  *     sub-fetch fails the contract header is still returned, with the failure named
  *     in the payload rather than silently rendered as an empty list.
  */
+/**
+ * WHICH ENDPOINT IS AUTHORITATIVE - answered by the KLIP team, 28 Aug 2026.
+ *
+ * getContract upstream is literally `SELECT * FROM contracts WHERE id = $1`: no joins,
+ * no derivations, no normalisation, and no business exclusions - because it applies
+ * nothing at all. That single fact explains every disagreement we had logged between
+ * this endpoint and the list, and none of them is a conflict:
+ *
+ *   plant     list "Cisadane"  detail "CD2A"   group and member - master_plants.group_plant
+ *                                              resolved from plant_code
+ *   status    list "Open"      detail "ACTIVE" different COLUMNS: the list surfaces
+ *                                              import_status (SAP-derived, normalised to
+ *                                              Open/Close), the detail the raw lifecycle
+ *                                              column, whose CHECK permits exactly
+ *                                              Open, Close, Cancelled, ACTIVE, COMPLETED,
+ *                                              CANCELLED. KLIP treats ACTIVE as OPEN and
+ *                                              COMPLETED as CLOSE throughout.
+ *   shipped   list 0           detail null     computed by the list; the column does not
+ *                                              exist on the row, so null is honest here
+ *                                              and 0 would be a lie
+ *
+ * So: THE LIST IS AUTHORITATIVE FOR ANYTHING DERIVED - shipped, received, outstanding,
+ * normalised status, group plant. The detail answers "what is stored", the list answers
+ * "what is reportable". A contract fetchable by id and absent from every list is expected
+ * behaviour rather than a leak.
+ */
 import { z } from 'zod';
 import { dig, fetchEnvelope, walk } from './../../adapters/klip/paginate.js';
 import { routes } from './../../adapters/klip/routes.js';
@@ -143,14 +169,20 @@ export const getContract: ToolDefinition<typeof inputShape> = {
       // squeezing it into "ETD/ETA" made arrival-at-loading look like a destination ETA
       // sitting BEFORE its own departure. That was reported as a KLIP column swap; it
       // was this mapping. See fields.shipment.
-      eta_loading_arrival: toWibIso(pickString(row, fields.shipment.etaLoadArrival)),
-      eta_sailed_from_loading: toWibIso(pickString(row, fields.shipment.etaSailed)),
-      eta_discharge_arrival: toWibIso(pickString(row, fields.shipment.etaDischArrival)),
-      eta_discharge_complete: toWibIso(pickString(row, fields.shipment.etaDischComplete)),
-      ata_loading_arrival: toWibIso(pickString(row, fields.shipment.ataLoadArrival)),
-      ata_sailed_from_loading: toWibIso(pickString(row, fields.shipment.ataSailed)),
-      ata_discharge_arrival: toWibIso(pickString(row, fields.shipment.ataDischArrival)),
-      ata_discharge_complete: toWibIso(pickString(row, fields.shipment.ataDischComplete)),
+      // DATE COLUMNS, so date-only. Confirmed by the KLIP team, 28 Aug 2026: these are
+      // PostgreSQL DATE values, which carry no time and no zone. The driver parses one at
+      // local midnight, the container is UTC, and JSON.stringify appends the Z - so
+      // 2026-07-15T00:00:00.000Z is the exact calendar date and nothing else. Converting
+      // it to WIB would attach a time that was never recorded, and any backward shift
+      // would move the date to the previous day. Read the date part and discard the rest.
+      eta_loading_arrival: toDateOnly(pickString(row, fields.shipment.etaLoadArrival)),
+      eta_sailed_from_loading: toDateOnly(pickString(row, fields.shipment.etaSailed)),
+      eta_discharge_arrival: toDateOnly(pickString(row, fields.shipment.etaDischArrival)),
+      eta_discharge_complete: toDateOnly(pickString(row, fields.shipment.etaDischComplete)),
+      ata_loading_arrival: toDateOnly(pickString(row, fields.shipment.ataLoadArrival)),
+      ata_sailed_from_loading: toDateOnly(pickString(row, fields.shipment.ataSailed)),
+      ata_discharge_arrival: toDateOnly(pickString(row, fields.shipment.ataDischArrival)),
+      ata_discharge_complete: toDateOnly(pickString(row, fields.shipment.ataDischComplete)),
       qty_mt: kgToMt(pickNumber(row, fields.shipment.qty)),
     }));
 

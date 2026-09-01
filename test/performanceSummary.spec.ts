@@ -79,7 +79,7 @@ describe('the filters it offers, and the one it does not', () => {
     const out = await tool.handler({} as never, ctx);
     const d = out.data as Record<string, any>;
     expect(String(d.filters_unavailable)).toMatch(/No contract-status filter/);
-    expect(String(d.filters_unavailable)).toMatch(/split into open and closed/);
+    expect(String(d.filters_unavailable)).toMatch(/splits every figure into open and closed/);
   });
 
   it('says the figures are company-wide when nothing narrowed them', async () => {
@@ -140,7 +140,7 @@ describe('the scope=filtered gate', () => {
     // so it is a filter that would silently do nothing.
     expect(Object.keys(tool.inputShape)).not.toContain('status');
     const out = await tool.handler({} as never, ctx);
-    expect(String((out.data as Record<string, any>).filters_unavailable)).toMatch(/does not narrow/i);
+    expect(String((out.data as Record<string, any>).filters_unavailable)).toMatch(/only for the exact strings/i);
   });
 });
 
@@ -156,6 +156,6 @@ describe('the two cohorts are kept apart', () => {
     const out = await tool.handler({} as never, ctx);
     const d = out.data as Record<string, any>;
     expect(d.all_contracts_by_status).not.toBeNull();
-    expect(String(d.cohort_note)).toMatch(/Never read the first as a plant total/i);
+    expect(String(d.cohort_note)).toMatch(/DIFFERENT POPULATIONS/);
   });
 });

@@ -73,19 +73,27 @@ describe('canonical vocabularies', () => {
     expect(unseen.length).toBeGreaterThan(0);
   });
 
-  it('names the incoterms it cannot compute an outstanding basis for', async () => {
+  it('names the incoterms that take KLIP\'s fallback basis, and excludes none of them', async () => {
     const out = await reference.handler({ facet: 'incoterms' } as never, ctx);
-    const data = out.data as { incoterms_unclassified?: string[]; incoterms_unclassified_note?: string };
-    // CFR and Blank are in KLIP's list and in neither basis group.
-    expect(data.incoterms_unclassified).toContain('CFR');
-    expect(data.incoterms_unclassified).toContain('Blank');
-    expect(String(data.incoterms_unclassified_note)).toMatch(/EXCLUDED from outstanding totals/);
-    // CIF is classified, so it must NOT appear.
-    expect(data.incoterms_unclassified).not.toContain('CIF');
+    const data = out.data as {
+      incoterms_on_fallback_basis?: string[];
+      incoterms_on_fallback_basis_note?: string;
+      incoterm_outstanding_basis?: { received_basis?: readonly string[] };
+    };
+    // Blank is not named in KLIP's basis SQL, so it takes the ELSE rule.
+    expect(data.incoterms_on_fallback_basis).toContain('Blank');
+    // CFR IS named there - received-basis - and must no longer appear as a fallback.
+    // Until 28 Aug 2026 we published it as unclassified and excluded those contracts.
+    expect(data.incoterms_on_fallback_basis).not.toContain('CFR');
+    expect(data.incoterm_outstanding_basis?.received_basis).toContain('cfr');
+    expect(data.incoterms_on_fallback_basis).not.toContain('CIF');
+    expect(String(data.incoterms_on_fallback_basis_note)).toMatch(/counted, not excluded/);
   });
 
   it('warns that a group-plant is not a physical site', async () => {
-    // KLIP's canonical list collapses the two TJ.PURA sites that trucking distinguishes.
+    // KLIP's canonical list collapses EIGHT TJ.PURA sites that trucking distinguishes.
+    // We had recorded two; the KLIP team supplied the full list from master_plants on
+    // 28 Aug 2026 and agreed the framing, calling our caveat correct and understated.
     // Presenting it as a site register would merge two plants into one total.
     const out = await reference.handler({ facet: 'plants' } as never, ctx);
     const data = out.data as { plants: Array<{ value: string }>; plants_source: string; plants_caveat: string };

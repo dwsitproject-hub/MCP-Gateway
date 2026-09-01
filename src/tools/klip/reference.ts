@@ -96,9 +96,13 @@ export const reference: ToolDefinition<typeof inputShape> = {
         data.plants = canonicalPlants.map((value) => ({ value }));
         data.plants_source = 'canonical: KLIP filter-options/group-plants, the complete set';
         data.plants_caveat =
-          'These are CONTRACT group-plant values and are not a site register. KLIP reports one ' +
-          '"TJ PURA" here, while trucking distinguishes "EUP EDIBLE OIL TJ.PURA" from ' +
-          '"EUP BIOMASS TJ.PURA". Do not treat a single group-plant as a single physical site.';
+          'These are CONTRACT group-plant values and are NOT a site register. A group plant is a ' +
+          'reporting bucket; the site register is master_plants.plant_name. The single "TJ PURA" value ' +
+          'here covers EIGHT distinct plants - EUP Biodiesel, Biodiesel Old, Biomass, Edible Oil, ' +
+          'General, Oleo Chemical (two spellings) and MPE Edible Oil - confirmed by the KLIP team on ' +
+          '28 Aug 2026 from master_plants.group_plant. Trucking works at site level and distinguishes ' +
+          'them; contract reporting rolls them up, because that is what the group dimension is for. ' +
+          'Never report a group-plant figure as one physical site.';
       } else {
         data.plants = tally(rows, fields.contract.plant);
         data.plants_source = 'sampled from contract rows: the canonical list could not be read';
@@ -163,26 +167,43 @@ export const reference: ToolDefinition<typeof inputShape> = {
             'Usable as filter values because the data contains them, but worth raising with KLIP - ' +
             'either the list is incomplete or those rows carry a value KLIP no longer recognises.';
         }
-        const unclassified = [...canonicalIncoterms, ...extras].filter(
+        /**
+         * Nothing is unclassified any more, so this reports which incoterms take KLIP's
+         * FALLBACK rule rather than a named one. Until 28 Aug 2026 the same list was
+         * published as "no defensible basis" and those contracts were excluded from
+         * outstanding - which, as the KLIP team pointed out, dropped precisely the
+         * contracts with no movement at all, the ones sitting at 100% outstanding.
+         */
+        const fallback = [...canonicalIncoterms, ...extras].filter(
           (v) => !known.has(v.trim().toLowerCase()),
         );
-        if (unclassified.length > 0) {
-          data.incoterms_unclassified = unclassified;
-          data.incoterms_unclassified_note =
-            `These incoterms exist in KLIP but this connector has no outstanding basis for them: ` +
-            `${unclassified.join(', ')}. Contracts using them are EXCLUDED from outstanding totals and ` +
-            'flagged, never assumed onto a basis. Classification has been requested from the KLIP team.';
+        if (fallback.length > 0) {
+          data.incoterms_on_fallback_basis = fallback;
+          data.incoterms_on_fallback_basis_note =
+            `These incoterms are not named in KLIP's basis SQL, so they take its ELSE rule: ` +
+            `${fallback.join(', ')}. Outstanding for them uses the RECEIVED quantity when it is ` +
+            'non-zero and the SHIPPED quantity otherwise. They are counted, not excluded.';
         }
       } else {
         data.incoterms = tally(rows, fields.contract.incoterm);
         data.incoterms_source = 'sampled from contract rows: the canonical list could not be read';
       }
+      /**
+       * KLIP's own rule, from sqlContractActualQtySubtractedCase, supplied by the KLIP
+       * team on 28 Aug 2026:
+       *
+       *   WHEN inc IN ('FRC', 'CIF', 'CFR') THEN receive
+       *   WHEN inc IN ('LCO', 'FOB')        THEN delivery
+       *   ELSE COALESCE(NULLIF(receive, 0), delivery)
+       */
       data.incoterm_outstanding_basis = {
         shipped_basis: enums.shippedBasisIncoterms,
         received_basis: enums.receivedBasisIncoterms,
+        everything_else: 'received when non-zero, otherwise shipped',
         note:
-          'An incoterm not listed in either group has no defensible outstanding basis, so contracts using it are ' +
-          'excluded from outstanding totals and flagged as a data-quality note rather than assumed.',
+          'This mirrors KLIP\'s own basis SQL, including its ELSE branch, so no incoterm is unclassified and ' +
+          'none is excluded. CFR is received-basis and blank takes the ELSE rule. Contract counts by incoterm ' +
+          'across all of KLIP, as at 28 Aug 2026: FRC 4,328, LCO 1,806, FOB 912, CIF 161, CFR 8, blank 1.',
       };
     }
 
