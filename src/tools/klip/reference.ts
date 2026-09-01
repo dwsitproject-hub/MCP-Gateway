@@ -102,7 +102,9 @@ export const reference: ToolDefinition<typeof inputShape> = {
           'General, Oleo Chemical (two spellings) and MPE Edible Oil - confirmed by the KLIP team on ' +
           '28 Aug 2026 from master_plants.group_plant. Trucking works at site level and distinguishes ' +
           'them; contract reporting rolls them up, because that is what the group dimension is for. ' +
-          'Never report a group-plant figure as one physical site.';
+          'Never report a group-plant figure as one physical site. The rollup is the AGREED reporting ' +
+          'standard, confirmed by Jerry (KPN Downstream IT) in Sep 2026 after KLIP put the question to ' +
+          'him - so this is settled, not a limitation waiting on a decision.';
       } else {
         data.plants = tally(rows, fields.contract.plant);
         data.plants_source = 'sampled from contract rows: the canonical list could not be read';
