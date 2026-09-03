@@ -23,6 +23,7 @@ import { pruneState as pruneHubState, probe as hubProbe } from './auth/hub.js';
 import { purgeExpired } from './core/cache.js';
 import { SERVER_INFO } from './mcp/server.js';
 import { toolNames } from './tools/klip/index.js';
+import { knowledgeTools } from './tools/knowledge/index.js';
 
 const HOUSEKEEPING_INTERVAL_MS = 15 * 60_000;
 
@@ -67,7 +68,22 @@ async function main(): Promise<void> {
 
   const server = app.listen(cfg.PORT, cfg.BIND_ADDRESS, () => {
     logger.info(
-      { port: cfg.PORT, bind: cfg.BIND_ADDRESS, tools: toolNames.length },
+      /**
+       * BOTH tool families, because this line is how a deploy gets verified.
+       *
+       * It counted klipTools only, so it read 12 while 15 tools were registered - and
+       * the three knowledge tools would have looked like they had not deployed. That
+       * matters more than a cosmetic undercount: earlier in this project a stale tool
+       * list cost three rounds of debugging, and this log was the thing that finally
+       * settled it. A verification signal that undercounts is worse than none.
+       */
+      {
+        port: cfg.PORT,
+        bind: cfg.BIND_ADDRESS,
+        tools: toolNames.length + knowledgeTools.length,
+        klip_tools: toolNames.length,
+        knowledge_tools: knowledgeTools.length,
+      },
       'listening (public access is via nginx only - T-2)',
     );
   });
