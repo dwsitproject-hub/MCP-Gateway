@@ -57,13 +57,21 @@ export interface ToolDefinition<Shape extends InputShape = InputShape> {
   inputShape: Shape;
   /** Row cap advertised in the description and enforced before data enters context. */
   cap: number;
+  /**
+   * False only for the knowledge tools, which write to the GATEWAY's own
+   * knowledge base (its local Postgres). Nothing anywhere writes to KLIP:
+   * every tool in tools/klip is read-only and the adapter's method guard
+   * blocks non-GET regardless. Defaults to true.
+   */
+  readOnly?: boolean;
   handler: (params: z.infer<z.ZodObject<Shape>>, ctx: ToolContext) => Promise<ToolOutcome>;
 }
 
 /** Appended to every tool description so the read-only contract is visible to the model. */
 export const READ_ONLY_NOTE =
   'READ-ONLY: this tool only reads KLIP data. It cannot create, update, approve or delete anything, ' +
-  'and no such capability exists anywhere in this connector.';
+  'and no tool in this connector can write to KLIP. (The klip_knowledge_* tools write only to the ' +
+  "gateway's own curated notes, never to KLIP.)";
 
 export function describe(text: string, cap: string): string {
   return `${text.trim()} ${cap.trim()} ${READ_ONLY_NOTE}`;

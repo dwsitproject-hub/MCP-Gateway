@@ -39,15 +39,16 @@ disagree with the design documents, **the SDK wins** — it defines the exact AP
 
 ```
 src/
-  core/       config, logger, db, audit, cache, rateLimit, semaphore, migrate, errors
+  core/       config, logger, db, audit, cache, rateLimit, semaphore, migrate, errors, knowledge
   adapters/klip/  routes(APPENDIX A) · fields(APPENDIX A) · client(guard) · session · paginate · normalize
-  tools/klip/ 9 tool definitions + shared parameter plumbing
+  tools/klip/ 12 read-only tool definitions + shared parameter plumbing
+  tools/knowledge/ 3 knowledge-base tools (gateway-local memory; see Section 3a)
   mcp/        server, envelope, runner
   auth/       keys, hub(OIDC RP), users, clients, tokens, provider, loginPage
   http/       app, consent(Hub + break-glass), health, origin, clientIp
-migrations/   idempotent SQL (001 schema, 002 Hub OIDC)
+migrations/   idempotent SQL (001 schema, 002 Hub OIDC, 003 knowledge base)
 deploy/       nginx config, backup sidecar
-test/         120 tests + mock KLIP and mock Hub fixtures
+test/         tests + mock KLIP and mock Hub fixtures
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -194,6 +195,45 @@ work for a connector: the callback exists to complete an authorization request C
 started, so arriving without one leaves nothing to issue a code against. The gateway
 detects it and says "start from Claude instead" rather than failing as "sign-in
 expired".
+
+## 3a. Knowledge base — context & memory for the connector itself
+
+The gateway carries its own **provider-independent memory** (migration 003), so an
+answer established once — a definition, a business rule, a data caveat — reaches
+every future conversation regardless of which user or AI client asks. Nothing
+depends on any one vendor's memory feature: knowledge travels in the MCP protocol
+itself, through three channels.
+
+1. **MCP `instructions`** — entries that are `verified` **and** `pinned` are
+   summarised into the instructions string served at initialize (cached 5 min,
+   ~2 KB budget). Every client starts from the load-bearing facts.
+2. **`klip_knowledge_search`** — retrieval on demand: full-text search over
+   entries, verified ranked above proposed, deprecated hidden by default.
+3. **`klip_knowledge_save` / `klip_knowledge_feedback`** — the write path. A
+   model saves a durable fact (it lands as `proposed`) and votes on entries that
+   helped or proved wrong. That is the self-improvement loop.
+
+**Trust lifecycle.** An AI-saved entry is a *claim*, labelled `proposed` in every
+search result. It becomes `verified` only when **two distinct users** vote it
+helpful (one vote per user per entry, enforced by primary key). Two `outdated`
+votes deprecate an entry; a verified correction (`supersedes`) retires what it
+replaced. Only verified entries can be pinned into the instructions preamble,
+and pinning itself is a curator action in SQL, not reachable from any tool.
+
+**Write boundary (S1 unchanged).** The knowledge tools write to the gateway's
+own Postgres — the same database that already holds OAuth clients and audit
+rows. They import nothing from `adapters/klip`; every KLIP tool remains strictly
+read-only and the adapter method guard still blocks non-GET. The knowledge write
+tools advertise `readOnlyHint: false` so the annotations stay honest.
+
+**Content rules.** Entries are notes ABOUT data, never data: no conversation-
+specific numbers, no personal data. Bodies are capped at 2,000 chars, cleaned of
+control characters on write, and sanitised like KLIP free text on the way out —
+entry text is served as data, never as instructions. A per-user cap (20 new
+entries/24 h) plus body-fingerprint dedup keeps one noisy session from flooding
+the store. Migration 003 seeds nine curated entries (group-plant semantics,
+shipment co-assignment invariants, KG-vs-MT storage, incoterm outstanding bases,
+SAP-absence caveat, …) as `verified`/`seed`.
 
 ## 4. Quick start (local)
 
