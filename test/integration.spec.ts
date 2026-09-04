@@ -272,24 +272,35 @@ describe('typed errors', () => {
     expect(data.summary_scope).toMatch(/covers exactly this query/);
   });
 
-  it('ages open shipments against the delivery window KLIP publishes', async () => {
-    // The user's actual question - past the due delivery end with no estimate and no
-    // actual - which a live chat answered with "no delivery-end-date field exists".
+  it('reports KLIP\'s overdue buckets rather than computing a rival count', async () => {
+    // "How many are overdue or due soon" is a question KLIP already answers - the
+    // Pending ATC card, backed by summary.etaLoading / etaDischarge. This connector
+    // used to derive its own from delivery_end_date and milestone nulls, which is
+    // how a second number for the same question gets born.
     const { outcome } = await run('klip_shipment_status', { plant: 'Bontang', open_only: true });
     const data = outcome.data as {
-      delivery_window_ageing: {
-        open_shipments_considered: number;
-        past_delivery_end_7_days_or_more: number;
-        of_those_no_estimate_and_no_actual: number;
+      klip_status_summary: {
+        eta_loading: { delay: number; noEta: number } | null;
+        eta_discharge: { delay: number } | null;
+        unplanned_detail: { contractRows: number; shipmentRows: number } | null;
       };
+      overdue_and_due_soon: string;
+      delivery_window_ageing?: unknown;
       shipments: Array<{ delivery_end_date: string | null; days_past_delivery_end: number | null }>;
     };
-    // SHP-1 (ARRIVED_DP) and SHP-2 (PLANNED) are open; SHP-3 is COMPLETED.
-    expect(data.delivery_window_ageing.open_shipments_considered).toBe(2);
-    expect(data.delivery_window_ageing.past_delivery_end_7_days_or_more).toBe(2);
-    // Only SHP-2 has neither an estimate nor an actual anywhere.
-    expect(data.delivery_window_ageing.of_those_no_estimate_and_no_actual).toBe(1);
-    // Most overdue first, so the answer survives the row cap.
+
+    expect(data.klip_status_summary.eta_loading?.delay).toBe(8);
+    expect(data.klip_status_summary.eta_loading?.noEta).toBe(14);
+    expect(data.klip_status_summary.eta_discharge?.delay).toBe(21);
+    // The rival computation is gone, not merely renamed.
+    expect(data.delivery_window_ageing).toBeUndefined();
+    expect(data.overdue_and_due_soon).toMatch(/delay` is overdue/);
+
+    // `unplanned` counts CONTRACT rows, which is why the cards do not sum to the total.
+    expect(data.klip_status_summary.unplanned_detail?.contractRows).toBe(2);
+    expect(data.klip_status_summary.unplanned_detail?.shipmentRows).toBe(0);
+
+    // open_only still sorts the most overdue first, so the answer survives the cap.
     expect(data.shipments[0]?.delivery_end_date).toBe('2026-01-10');
   });
 

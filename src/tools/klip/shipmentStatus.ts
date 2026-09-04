@@ -209,7 +209,17 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
 
     // --- KLIP's own summary, reported rather than recomputed ------------------
     const summary = dig(walked.firstBody, 'data.summary') as
-      | { total?: number; status?: Record<string, number>; statusVesselNames?: Record<string, string[]> }
+      | {
+          total?: number;
+          status?: Record<string, number>;
+          statusVesselNames?: Record<string, string[]>;
+          etaLoading?: Record<string, number>;
+          etaDischarge?: Record<string, number>;
+          loadingPortBreakdown?: Record<string, number>;
+          dischargePortBreakdown?: Record<string, number>;
+          unplannedTable?: Record<string, number>;
+          preplannedTable?: Record<string, number>;
+        }
       | undefined;
     const counts = summary?.status;
 
@@ -229,15 +239,35 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
         completed: counts.completed ?? null,
         cancelled: counts.cancelled ?? null,
         vessels_by_status: summary?.statusVesselNames ?? null,
+        /**
+         * KLIP'S OWN "overdue / due soon" answer, which we were recomputing.
+         *
+         * The Shipments page carries a "Pending ATC (Overdue / Due <=7d)" card, and
+         * the API returns the buckets behind it: moreThan7D, dMinus2, d, delay
+         * (overdue) and noEta, for the loading and discharge sides separately. This
+         * connector previously derived its own ageing from delivery_end_date and
+         * milestone nulls - a second answer to a question KLIP already answers, and
+         * the exact pattern that produced a third outstanding figure earlier in this
+         * project. KLIP's figures reconcile with the page; ours did not have to.
+         */
+        eta_loading: summary?.etaLoading ?? null,
+        eta_discharge: summary?.etaDischarge ?? null,
+        loading_port_breakdown: summary?.loadingPortBreakdown ?? null,
+        discharge_port_breakdown: summary?.dischargePortBreakdown ?? null,
+        // What the unplanned and preplanned cards actually count - see the
+        // reconciliation note below.
+        unplanned_detail: summary?.unplannedTable ?? null,
+        preplanned_detail: summary?.preplannedTable ?? null,
       };
       // Surfaced, not smoothed. Measured for Bontang: total 143, parts 179.
       if (summary?.total !== undefined && parts !== summary.total) {
         data.klip_summary_reconciliation =
-          `KLIP's own status counts sum to ${parts} against its own total of ${summary.total}. Two known ` +
-          'causes: `unplanned` has no shipment rows behind it (filtering on UNPLANNED returns none), so ' +
-          'it appears to count contract lines awaiting a shipment rather than shipments; and `completed` ' +
-          'has read one higher than the COMPLETED row count. Report the individual card figures, which ' +
-          'match the page, and do not present the sum as a shipment total. Open with the KLIP team.';
+          `KLIP's status counts sum to ${parts} against its own total of ${summary.total}, because the ` +
+          'cards do not all count the same thing. `unplanned` counts CONTRACT rows awaiting a shipment ' +
+          'and `preplanned` counts GROUPS - see unplanned_detail and preplanned_detail above, which give ' +
+          'contractRows, shipmentRows and groupCount - while the other six count shipment rows. Report ' +
+          'each card as KLIP states it and never present the sum as a shipment total. Any residual gap ' +
+          'beyond those two is unexplained and is with the KLIP team.';
       }
     } else {
       data.klip_status_summary_absent =
@@ -260,31 +290,25 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
     data.rows_shown = shipments.length;
     data.rows_matching_all_filters = scoped.length;
 
-    // --- delivery-window ageing, over every matched row, not the shown sample ---
-    const openRows = matched.filter(isOpen);
-    const age = (row: Row): number | null => daysPast(toDateOnly(pickString(row, f.deliveryEndDate)), asOf);
-    const hasLoadingEta = (row: Row): boolean => pickString(row, f.etaLoadArrival) !== null;
-    const hasDischargeEta = (row: Row): boolean => pickString(row, f.etaDischArrival) !== null;
-    const hasAnyActual = (row: Row): boolean =>
-      pickString(row, f.ataLoadArrival) !== null || pickString(row, f.ataDischArrival) !== null;
-    const past7 = openRows.filter((r) => (age(r) ?? -1) >= 7);
-
-    data.delivery_window_ageing = {
-      basis: 'delivery_end_date - the Due Date Delivery End column, populated on every row.',
-      open_shipments_considered: openRows.length,
-      past_delivery_end: openRows.filter((r) => (age(r) ?? -1) > 0).length,
-      past_delivery_end_7_days_or_more: past7.length,
-      of_those_no_loading_eta: past7.filter((r) => !hasLoadingEta(r)).length,
-      of_those_no_discharge_eta: past7.filter((r) => !hasDischargeEta(r)).length,
-      of_those_no_estimate_and_no_actual: past7.filter(
-        (r) => !hasLoadingEta(r) && !hasDischargeEta(r) && !hasAnyActual(r),
-      ).length,
-      computed_by:
-        'This connector, from KLIP\'s own delivery_end_date and milestone columns. KLIP publishes no ' +
-        'equivalent figure, so this competes with nothing - but it is our arithmetic, not a KLIP card. ' +
-        'Counted over every row matching the filters, not over the capped list above. Cancelled and ' +
-        'completed shipments are excluded.',
-    };
+    /**
+     * The connector's own delivery-window ageing was REMOVED here on 4 Sep 2026.
+     *
+     * It counted open shipments past delivery_end_date with no estimate and no
+     * actual - a reasonable answer to a real question, and a rival to one KLIP
+     * already publishes. The Shipments page has a "Pending ATC (Overdue / Due
+     * <=7d)" card, and data.summary carries etaLoading and etaDischarge with
+     * delay/noEta/dMinus2/d/moreThan7D buckets behind it. Two systems answering
+     * "what is overdue" with different arithmetic is how a third number gets born,
+     * which is the failure this connector has spent weeks removing.
+     *
+     * KLIP's buckets are reported above under klip_status_summary instead.
+     */
+    data.overdue_and_due_soon =
+      'Use eta_loading and eta_discharge under klip_status_summary above: `delay` is overdue, `d` is due ' +
+      'today, `dMinus2` is due within two days, `moreThan7D` is further out, and `noEta` has no estimated ' +
+      'time recorded at all. These are KLIP\'s own counts, behind its "Pending ATC (Overdue / Due <=7d)" ' +
+      'card, and they reconcile with the page. This connector deliberately does not compute a rival ' +
+      'figure from delivery dates and milestone nulls.';
 
     /**
      * Verified on contract 1004031366, 28 Aug 2026: four STOs, each row carrying

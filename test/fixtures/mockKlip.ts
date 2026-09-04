@@ -577,6 +577,18 @@ export function createMockKlip(state: MockState): Express {
         planned: rows.filter((r) => r.status === 'PLANNED' && r.vessel_name !== null).map((r) => r.vessel_name),
         atDischargePort: rows.filter((r) => r.status === 'ARRIVED_DP').map((r) => r.vessel_name),
       },
+      // The rest of what a real data.summary carries, read from staging on
+      // 2026-09-04. etaLoading/etaDischarge are the buckets behind the page's
+      // "Pending ATC (Overdue / Due <=7d)" card - the connector reports these
+      // rather than deriving its own overdue count.
+      etaLoading: { moreThan7D: 4, dMinus2: 1, d: 0, delay: 8, noEta: 14 },
+      etaDischarge: { moreThan7D: 9, dMinus2: 0, d: 0, delay: 21, noEta: 1 },
+      loadingPortBreakdown: { arrived: 0, berthed: 2, loading: 2, completedLoading: 0 },
+      dischargePortBreakdown: { arrived: 8, berthed: 1, unloading: 13 },
+      // Why the cards do not sum to the total: these two count contracts and
+      // groups, not shipments.
+      unplannedTable: { contractRows: 2, shipmentRows: 0, totalTableRows: 2 },
+      preplannedTable: { groupCount: 0, contractRows: 0, totalTableRows: 0 },
     };
 
     res.json(nested('shipments', rows, req, summary));
