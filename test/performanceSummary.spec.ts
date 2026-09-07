@@ -62,7 +62,10 @@ describe('the summary itself', () => {
 describe('the filters it offers, and the one it does not', () => {
   it('offers exactly the parameters KLIP demonstrably applies', async () => {
     // A parameter absent from the schema is a visible limitation; one that silently does
-    // nothing is not. status is absent for that reason - see the gate suite below.
+    // nothing is not. status was absent on that reasoning until 7 Sep 2026, when
+    // watching the page showed it sending status=Open against /late-performance/data -
+    // so it does work, for those exact strings. breakdown_depth arrived with the same
+    // discovery: /data returns KLIP's drilldown trees that /summary does not.
     expect(Object.keys(tool.inputShape)).toEqual([
       'date_from',
       'date_to',
@@ -72,6 +75,8 @@ describe('the filters it offers, and the one it does not', () => {
       'product',
       'incoterm',
       'search',
+      'status',
+      'breakdown_depth',
     ]);
   });
 
@@ -96,10 +101,77 @@ describe('attribution and units', () => {
     expect(String(d.computed_by)).toMatch(/without saying which produced which/i);
   });
 
-  it('claims no unit for the quantities', async () => {
+  it('converts every quantity to MT and leaves counts and day figures alone', async () => {
+    /**
+     * This tool used to report kilograms raw under "the unit is NOT confirmed". A live
+     * chat on 4 Sep 2026 duly published 391,988,806 and refused to call it tonnes; the
+     * user then compared it with the page, where the same figure renders as 419,223 MT
+     * against a tool reading of 419,223,245. The ratio was settled twice over.
+     *
+     * The conversion keys off "qty" in the field name, so the risk this test guards is
+     * the opposite error: dividing a COUNT or a DAY figure by 1,000, which would be far
+     * worse than reporting kilograms.
+     */
     const out = await tool.handler({} as never, ctx);
-    expect(out.units).toBeNull();
-    expect(String((out.data as Record<string, any>).units_note)).toMatch(/NOT confirmed/);
+    expect(out.units).toBe('MT');
+
+    const d = out.data as Record<string, any>;
+
+    // Unfiltered mock: n = 254, so openOutstandingQty is 127,000 kg.
+    expect(d.late_contracts.openOutstandingQty).toBe(127);
+    expect(d.late_contracts.totalQtyDelivery).toBe(254);
+    expect(d.all_contracts_by_status.openOutstandingQty).toBe(127);
+    expect(d.lateness_distribution.onTime.qty).toBe(1);
+
+    // Untouched: counts, durations and cycle days carry no "qty" in their names.
+    expect(d.late_contracts.count).toBe(254);
+    expect(d.late_contracts.avgLogCycle).toBe(12);
+    expect(d.late_contracts.maxDays).toBe(61);
+    expect(d.all_contracts_by_status.openAvgLogCycle).toBe(12);
+    expect(d.all_contracts_by_status.openLateCount).toBe(5);
+    expect(d.lateness_distribution.onTime.count).toBe(10);
+
+    expect(String(d.units_note)).toMatch(/METRIC TONNES/);
+  });
+});
+
+describe('the drilldown', () => {
+  it("returns KLIP's nested breakdown, in MT, with each level named", async () => {
+    // The question a live chat could not answer: CPO outstanding per plant, incoterm
+    // and supplier. It needed hundreds of calls because this tool only read /summary;
+    // /late-performance/data carries the whole tree in one response.
+    const out = await tool.handler({ breakdown_depth: 2 } as never, ctx);
+    const d = out.data as Record<string, any>;
+
+    expect(d.breakdown_levels).toEqual(['incoterm', 'group_plant']);
+
+    const top = d.late_breakdown[0];
+    // Level names count DOWN from the top, not up from the maximum depth - labelling a
+    // two-level request `supplier_group` was the first version of this.
+    expect(top.level).toBe('incoterm');
+    expect(top.key).toBe('FOB');
+    expect(top.contracts).toBe(12);
+    expect(top.qty_delivered_mt).toBe(12_000); // 12,000,000 kg
+
+    expect(top.children[0].level).toBe('group_plant');
+    expect(top.children[0].key).toBe('BONTANG');
+    expect(top.children[0].qty_delivered_mt).toBe(8_000);
+    // Pruned at the requested depth, so no product level below.
+    expect(top.children[0].children).toBeUndefined();
+
+    // The bucket that is in neither the late nor the on-track counters.
+    expect(d.unscheduled_breakdown[0].key).toBe('CIF');
+    expect(d.unscheduled_breakdown[0].contracts).toBe(3);
+    expect(String(d.breakdown_note)).toMatch(/does not re-pivot/);
+  });
+
+  it('asks for no tree at all by default', async () => {
+    // /summary rather than /data, so a caller wanting only the cards does not pay for
+    // a five-level tree.
+    const out = await tool.handler({} as never, ctx);
+    const d = out.data as Record<string, any>;
+    expect(d.late_breakdown).toBeUndefined();
+    expect(d.breakdown_levels).toBeUndefined();
   });
 });
 
@@ -135,10 +207,20 @@ describe('the scope=filtered gate', () => {
     expect(q?.query.transportMode).toBe('SEA');
   });
 
-  it('still offers no contract-status filter', async () => {
-    // scope=filtered&status=Open leaves all four card counts unchanged on live KLIP,
-    // so it is a filter that would silently do nothing.
-    expect(Object.keys(tool.inputShape)).not.toContain('status');
+  it('offers the status filter KLIP actually honours, as an enum', async () => {
+    // KLIP accepts Open and Close exactly - any other casing matches nothing upstream
+    // and returns zeros rather than an error, so the enum is enforced on this side.
+    // The page itself sends status=Open, which is how we found it.
+    expect(Object.keys(tool.inputShape)).toContain('status');
+    await expect(
+      (async () => {
+        const { z } = await import('zod');
+        return z.strictObject(tool.inputShape).parse({ status: 'open' });
+      })(),
+    ).rejects.toThrow(/Invalid option/);
+  });
+
+  it('still explains the status filter rather than leaving it a mystery', async () => {
     const out = await tool.handler({} as never, ctx);
     expect(String((out.data as Record<string, any>).filters_unavailable)).toMatch(/only for the exact strings/i);
   });

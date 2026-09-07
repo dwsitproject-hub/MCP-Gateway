@@ -691,6 +691,84 @@ export function createMockKlip(state: MockState): Express {
    * status and plant are accepted and discarded, exactly as KLIP does - so a test that
    * expects them to narrow anything will fail here too, which is the point.
    */
+  /**
+   * /late-performance/data - the Contract Performance page's drilldown. A superset of
+   * /summary: the same four objects plus three nested trees, in KLIP's own fixed order
+   * incoterm > group plant > product > supplier group > supplier. Shape and quantity
+   * unit (kilograms) copied from staging on 2026-09-07.
+   */
+  app.get('/api/contracts/late-performance/data', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    const leaf = (key: string, count: number, kg: number): unknown => ({
+      key,
+      count,
+      totalDays: count * 4,
+      maxDays: 30,
+      totalQtyDelivery: kg,
+      children: [{ key: `${key} PT.`, count, totalDays: count * 4, maxDays: 30, totalQtyDelivery: kg }],
+    });
+    const tree = [
+      {
+        key: 'FOB',
+        count: 12,
+        totalDays: 48,
+        maxDays: 30,
+        totalQtyDelivery: 12_000_000,
+        children: [
+          {
+            key: 'BONTANG',
+            count: 8,
+            totalDays: 32,
+            maxDays: 30,
+            totalQtyDelivery: 8_000_000,
+            children: [
+              {
+                key: 'CPO',
+                count: 8,
+                totalDays: 32,
+                maxDays: 30,
+                totalQtyDelivery: 8_000_000,
+                children: [leaf('BGA', 5, 5_000_000), leaf('MAS', 3, 3_000_000)],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    res.json({
+      success: true,
+      data: {
+        scope: req.query.scope ?? 'all',
+        ytd_range: { dateFrom: '2026-01-01', dateTo: '2026-09-07' },
+        summary: {
+          count: 12, totalDays: 48, avgDays: 4.0, maxDays: 30,
+          totalQtyDelivery: 12_000_000, avgLogCycle: 12, avgCashCycle: 30,
+          openOutstandingQty: 6_000_000, closeOutstandingQty: 0,
+        },
+        onTrackSummary: {
+          count: 6, totalDays: 0, avgDays: 0, maxDays: 0,
+          totalQtyDelivery: 4_000_000, avgLogCycle: 10, avgCashCycle: 28,
+          openOutstandingQty: 2_000_000, closeOutstandingQty: 0,
+        },
+        statusCardSummary: {
+          openOutstandingQty: 6_000_000, closeContractQty: 0,
+          openOnTimeCount: 10, openLateCount: 5, closeOnTimeCount: 2, closeLateCount: 1,
+          openAvgDays: 4.0, openAvgLogCycle: 12, openAvgDpCycle: 8, openAvgCashCycle: 30,
+        },
+        distribution: { onTime: { count: 10, qty: 1_000_000 } },
+        tree,
+        onTrackTree: [
+          { key: 'FRC', count: 6, totalDays: 0, maxDays: 0, totalQtyDelivery: 4_000_000, children: [] },
+        ],
+        // The "no data" bucket - contracts with no resolvable trade cycle, in neither
+        // the late nor the on-track counters.
+        unscheduledTree: [
+          { key: 'CIF', count: 3, totalDays: 0, maxDays: 0, totalQtyDelivery: 3_000_000, children: [] },
+        ],
+      },
+    });
+  });
+
   app.get('/api/contracts/late-performance/summary', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
     /**

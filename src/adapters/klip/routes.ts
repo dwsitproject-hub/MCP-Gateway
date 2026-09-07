@@ -378,6 +378,64 @@ export const routes = {
    * Units of totalQtyDelivery / openOutstandingQty / closeOutstandingQty are NOT
    * established and are not converted.
    */
+  /**
+   * The Contract Performance page's DRILLDOWN, found 7 Sep 2026 by watching what the
+   * page actually calls. A superset of /summary: identical summary objects plus three
+   * nested trees.
+   *
+   *   tree             the LATE cohort
+   *   onTrackTree      the on-time cohort
+   *   unscheduledTree  contracts with no resolvable trade cycle - the "no data" bucket,
+   *                    which a live chat found holding a THIRD of the population
+   *
+   * Each node is { key, count, totalDays, maxDays, totalQtyDelivery, children }, nested
+   * five deep in KLIP's own order:
+   *
+   *   incoterm -> group plant -> product -> supplier group -> supplier
+   *
+   * That order is KLIP's and is not reorderable here. A caller wanting
+   * plant -> incoterm -> supplier gets the same numbers, grouped the other way up;
+   * re-pivoting would mean re-aggregating, which is how a rival figure gets born.
+   *
+   * Verified against staging: scope=filtered&dateFrom=2026-01-01&dateTo=2026-09-07&
+   * status=Open&product=CPO returned four incoterm branches (FOB 66, FRC, LCO, CIF)
+   * with plant children (KARAWANG 23, BONTANG 29, BEKASI 5) and supplier-group leaves
+   * (BGA 8, MAS 5, FAL 6).
+   *
+   * Kept separate from /summary rather than replacing it, so a caller who wants only
+   * the cards does not pay for a five-level tree.
+   */
+  latePerformanceData: {
+    path: '/contracts/late-performance/data',
+    params: {
+      scope: 'scope',
+      plant: 'plant',
+      supplier: 'supplier',
+      product: 'product',
+      incoterm: 'incoterms',
+      status: 'status',
+      search: 'search',
+      transportMode: 'transportMode',
+      dateFrom: 'dateFrom',
+      dateTo: 'dateTo',
+    },
+    rowsPath: 'data',
+    totalPagesPath: '',
+    maxLimit: 0,
+    quantityUnit: 'kg',
+    dateFormat: 'iso-date' as const,
+    authMiddleware: 'bearerAuth',
+    verified: true as const,
+    verifiedBy: 'observed as the call the Contract Performance page makes, then replayed',
+    verifiedOn: '2026-09-07',
+    notes:
+      'Superset of /late-performance/summary: same summary/onTrackSummary/statusCardSummary/distribution ' +
+      'plus tree, onTrackTree and unscheduledTree. Nodes carry totalQtyDelivery in KILOGRAMS. Tree order ' +
+      'is incoterm > group plant > product > supplier group > supplier and is fixed by KLIP. The page ' +
+      'calls it with scope=filtered and an explicit dateFrom/dateTo of 1 Jan to TODAY, which is what its ' +
+      'YTD selector means.',
+  },
+
   latePerformanceSummary: {
     path: '/contracts/late-performance/summary',
     params: {
