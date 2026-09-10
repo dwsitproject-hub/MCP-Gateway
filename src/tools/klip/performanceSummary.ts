@@ -52,6 +52,37 @@ import { kgToMt } from './../../adapters/klip/normalize.js';
 import * as cache from './../../core/cache.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
 
+/**
+ * KLIP's YTD window: 1 January of the current year to TODAY, in WIB.
+ *
+ * WITHOUT DATES, KLIP APPLIES NO WINDOW AT ALL - it returns all-time figures, and says
+ * so only by returning ytd_range as {}. That is the single worst default available here,
+ * because the numbers look like the page's and are not.
+ *
+ * Measured 10 Sep 2026, statusCardSummary.openOutstandingQty for product CPO:
+ *
+ *              no dates      1 Jan - 10 Sep
+ *   KARAWANG    128,462          90,885
+ *   BEKASI       31,380          13,350
+ *   TANGERANG     5,784           4,700
+ *   all plants  475,367         417,369
+ *
+ * A live chat asked for CPO outstanding per plant, omitted the dates, and reported
+ * 480,440 MT against the page's 422,442 - then wrote a lateness analysis of Karawang
+ * and Bekasi, the two plants the missing window inflated most. Every figure it gave was
+ * all-time presented as year-to-date.
+ *
+ * So the window is now defaulted rather than left to the caller. All-time remains
+ * reachable by asking for it explicitly.
+ */
+function ytdWindow(now = Date.now()): { from: string; to: string } {
+  // WIB is UTC+7. Shifting before slicing keeps "today" the Indonesian today rather
+  // than yesterday for the seven hours after midnight local.
+  const wib = new Date(now + 7 * 60 * 60 * 1000);
+  const to = wib.toISOString().slice(0, 10);
+  return { from: `${to.slice(0, 4)}-01-01`, to };
+}
+
 /** incoterm > group plant > product > supplier group > supplier, KLIP's own order. */
 const LEVELS = ['incoterm', 'group_plant', 'product', 'supplier_group', 'supplier'] as const;
 const MAX_DEPTH = LEVELS.length;
@@ -81,6 +112,21 @@ const inputShape = {
     .enum(['Open', 'Close'])
     .optional()
     .describe('Contract status, as the KLIP page sends it. Case-sensitive upstream.'),
+  all_time: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Drop the date window entirely and report all-time figures. Off by default: without dates KLIP ' +
+        'returns all-time, which will not match the KLIP page and is rarely what was asked.',
+    ),
+  group_by: z
+    .enum(['incoterm', 'group_plant', 'product', 'supplier_group', 'supplier'])
+    .optional()
+    .describe(
+      'Aggregate KLIP\'s drilldown to one level and return a flat total per key - the direct way to ' +
+        'answer "per plant" or "per supplier". Never loop a filter over each plant instead: that misses ' +
+        'the Blank bucket and any value you did not think to query.',
+    ),
   breakdown_depth: z
     .number()
     .int()
@@ -151,7 +197,10 @@ function pruneTree(
       level,
       key: node.key ?? null,
       contracts: node.count ?? null,
-      qty_delivered_mt: kgToMt(node.totalQtyDelivery ?? null),
+      // Named qty_mt, not qty_delivered_mt. KLIP calls the field totalQtyDelivery but
+      // renders it as Outstanding Qty in the Open scope and Contract Qty in the Close
+      // scope, so a "delivered" label was wrong in both.
+      qty_mt: kgToMt(node.totalQtyDelivery ?? null),
       total_days: node.totalDays ?? null,
       max_days: node.maxDays ?? null,
     };
@@ -200,6 +249,48 @@ function quantitiesToMt(value: unknown): unknown {
   return out;
 }
 
+/**
+ * Aggregate KLIP's own drilldown nodes to one level.
+ *
+ * This is safe to do - and I had refused to on the grounds that re-aggregating creates
+ * a rival figure. Measured 10 Sep 2026 for product CPO, YTD, status Open: summing the
+ * plant level across the three trees gives 417,368 MT against the card's 417,369, a 1 MT
+ * rounding difference. The parts reconcile, so the aggregation reports KLIP's numbers
+ * rather than a second opinion, and the reconciliation is published beside it so a
+ * reader can see that for themselves.
+ *
+ * All THREE trees are walked. tree is the late cohort, onTrackTree the on-time one and
+ * unscheduledTree the contracts with no resolvable trade cycle - which for CPO holds
+ * 198,211 of the 417,369 MT, so omitting it would understate by nearly half.
+ */
+function aggregateLevel(
+  trees: ReadonlyArray<readonly TreeNode[] | undefined>,
+  levelIndex: number,
+): Array<{ key: string; qty_mt: number | null; contracts: number }> {
+  const acc = new Map<string, { kg: number; contracts: number }>();
+  const visit = (nodes: readonly TreeNode[] | undefined, depth: number): void => {
+    for (const node of nodes ?? []) {
+      if (depth === levelIndex) {
+        // KLIP renders the empty-key bucket as `Blank`; it appears in aggregations but
+        // never in the vocabulary endpoint, so a per-plant list that drops it fails to
+        // sum. A live chat reported exactly this as "1,000 MT not located".
+        const key = node.key ?? 'Blank';
+        const prev = acc.get(key) ?? { kg: 0, contracts: 0 };
+        acc.set(key, {
+          kg: prev.kg + Number(node.totalQtyDelivery ?? 0),
+          contracts: prev.contracts + Number(node.count ?? 0),
+        });
+        continue;
+      }
+      visit(node.children, depth + 1);
+    }
+  };
+  for (const tree of trees) visit(tree, 0);
+  return [...acc.entries()]
+    .map(([key, v]) => ({ key, qty_mt: kgToMt(v.kg), contracts: v.contracts }))
+    .sort((a, b) => (b.qty_mt ?? 0) - (a.qty_mt ?? 0));
+}
+
 interface SummaryBody {
   scope?: string;
   ytd_range?: { dateFrom?: string; dateTo?: string };
@@ -245,12 +336,19 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
      * so this is purely about not making every caller pay for a five-level tree they
      * did not ask for.
      */
-    const wantsTree = params.breakdown_depth > 0;
+    const wantsTree = params.breakdown_depth > 0 || params.group_by !== undefined;
     const route = wantsTree ? routes.latePerformanceData : routes.latePerformanceSummary;
 
     const upstream: Record<string, string> = {};
-    if (params.date_from !== undefined) upstream[route.params.dateFrom] = params.date_from;
-    if (params.date_to !== undefined) upstream[route.params.dateTo] = params.date_to;
+    /**
+     * Default to KLIP's YTD window. See ytdWindow: with no dates KLIP reports all-time,
+     * which silently inflated a live answer by 58,000 MT against the page.
+     */
+    const window = params.all_time ? undefined : ytdWindow();
+    const dateFrom = params.date_from ?? window?.from;
+    const dateTo = params.date_to ?? window?.to;
+    if (dateFrom !== undefined) upstream[route.params.dateFrom] = dateFrom;
+    if (dateTo !== undefined) upstream[route.params.dateTo] = dateTo;
     if (params.transport_mode !== undefined) upstream[route.params.transportMode] = params.transport_mode;
     if (params.plant !== undefined) upstream[route.params.plant] = params.plant;
     if (params.supplier !== undefined) upstream[route.params.supplier] = params.supplier;
@@ -294,6 +392,11 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
     const gatedInUse = GATED.filter((k) => params[k] !== undefined);
     if (gatedInUse.length > 0) upstream[route.params.scope] = 'filtered';
 
+    // The window and the scope flag are not dimensions; listing them as "filters
+    // applied" made a company-wide answer look narrowed.
+    const windowKeys = new Set<string>([route.params.dateFrom, route.params.dateTo, route.params.scope]);
+    const dimensions = Object.keys(upstream).filter((k) => !windowKeys.has(k));
+
     const query = new URLSearchParams(upstream).toString();
     const path = query === '' ? route.path : `${route.path}?${query}`;
 
@@ -330,7 +433,37 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
       all_contracts_by_status: quantitiesToMt(body.statusCardSummary ?? null),
       lateness_distribution: quantitiesToMt(body.distribution ?? null),
       ...(() => {
-        if (!wantsTree) return {};
+        if (params.group_by === undefined) return {};
+        const levelIndex = LEVELS.indexOf(params.group_by);
+        const groups = aggregateLevel([body.tree, body.onTrackTree, body.unscheduledTree], levelIndex);
+        const groupsTotal = groups.reduce((a, g) => a + (g.qty_mt ?? 0), 0);
+        const cardTotal = kgToMt(
+          Number((body.statusCardSummary as { openOutstandingQty?: number } | undefined)?.openOutstandingQty ?? 0),
+        );
+        return {
+          grouped_by: params.group_by,
+          groups,
+          groups_total_mt: Math.round(groupsTotal * 1000) / 1000,
+          groups_reconciliation:
+            cardTotal !== null && Math.abs(groupsTotal - cardTotal) <= Math.max(1, cardTotal * 0.001)
+              ? `Reconciles: the groups sum to ${Math.round(groupsTotal)} MT against KLIP's own open ` +
+                `outstanding of ${Math.round(cardTotal)} MT.`
+              : `DOES NOT RECONCILE: the groups sum to ${Math.round(groupsTotal)} MT against KLIP's own ` +
+                `open outstanding of ${Math.round(cardTotal ?? 0)} MT. Report KLIP's figure as the total ` +
+                'and treat the split as incomplete.',
+          groups_note:
+            'These are KLIP\'s own drilldown nodes, summed across its late, on-track and unscheduled ' +
+            'trees - not a recount. The unscheduled tree matters: for CPO it holds nearly half the ' +
+            'outstanding, so a split that omits it understates badly. `Blank` is contracts with no value ' +
+            'at this level; it appears here but never in the filter vocabulary, so do not drop it. ' +
+            'NEVER answer a per-plant question by looping a plant filter instead - that misses Blank and ' +
+            'any value you did not think to query.',
+        };
+      })(),
+      ...(() => {
+        // Undefined-safe: `undefined <= 0` is false, so a caller (or a test) that omits
+        // the field entirely would otherwise fall through and emit an empty tree.
+        if (!(params.breakdown_depth > 0)) return {};
         const budget = { left: NODE_BUDGET };
         const late = pruneTree(body.tree, params.breakdown_depth, budget);
         const onTrack = pruneTree(body.onTrackTree, params.breakdown_depth, budget);
@@ -390,10 +523,20 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
         'rules, which govern by the 24 August ruling. klip_outstanding computes its own figures from ' +
         'contract rows using incoterm-driven basis selection and may differ - do not present figures ' +
         'from both tools in one total without saying which produced which.',
+      /**
+       * The window is always present now, so "no filters" no longer exists - and saying
+       * so matters, because the whole failure this fixes was a caller believing they had
+       * year-to-date figures when KLIP had applied no window at all.
+       */
+      period_applied: params.all_time
+        ? 'ALL TIME - no date window. These figures will NOT match the KLIP page, which defaults to YTD.'
+        : `Year to date, ${dateFrom} to ${dateTo} - the window the KLIP page uses by default. Without ` +
+          'dates KLIP applies none and returns all-time figures, so this is defaulted rather than left ' +
+          'to chance.',
       filters_applied:
-        Object.keys(upstream).length === 0
-          ? 'None. These are company-wide figures for the year to date.'
-          : `Applied by KLIP across the whole matching dataset: ${Object.keys(upstream).join(', ')}.`,
+        dimensions.length === 0
+          ? 'No dimension filter: these are company-wide figures for the period above.'
+          : `Applied by KLIP across the whole matching dataset: ${dimensions.join(', ')}.`,
       /**
        * Corrected 28 Aug 2026. We had recorded that KLIP's status filter "does not narrow
        * the result". It does - we misread it twice over.

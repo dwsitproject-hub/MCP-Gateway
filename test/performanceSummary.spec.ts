@@ -39,7 +39,10 @@ describe('the summary itself', () => {
     // misreading the field name itself invited.
     const out = await tool.handler({} as never, ctx);
     const d = out.data as Record<string, any>;
-    expect(d.late_contracts.count).toBe(254);
+    // 40, not 254: the tool now always sends a YTD window, and the mock narrows on a
+    // date range exactly as KLIP does. Without dates KLIP applies NO window and
+    // returns all-time - which inflated a live per-plant answer by 58,000 MT.
+    expect(d.late_contracts.count).toBe(40);
     expect(d.late_contracts.avgLogCycle).toBe(12);
     expect(d.lateness_distribution.d61plus.count).toBe(1);
   });
@@ -76,6 +79,8 @@ describe('the filters it offers, and the one it does not', () => {
       'incoterm',
       'search',
       'status',
+      'all_time',
+      'group_by',
       'breakdown_depth',
     ]);
   });
@@ -87,7 +92,7 @@ describe('the filters it offers, and the one it does not', () => {
     expect(String(d.filters_unavailable)).toMatch(/splits every figure into open and closed/);
   });
 
-  it('says the figures are company-wide when nothing narrowed them', async () => {
+  it('says the figures are company-wide when no DIMENSION narrowed them', async () => {
     const out = await tool.handler({} as never, ctx);
     expect(String((out.data as Record<string, any>).filters_applied)).toMatch(/company-wide/i);
   });
@@ -118,13 +123,14 @@ describe('attribution and units', () => {
     const d = out.data as Record<string, any>;
 
     // Unfiltered mock: n = 254, so openOutstandingQty is 127,000 kg.
-    expect(d.late_contracts.openOutstandingQty).toBe(127);
-    expect(d.late_contracts.totalQtyDelivery).toBe(254);
-    expect(d.all_contracts_by_status.openOutstandingQty).toBe(127);
+    // n = 40 under the default YTD window: 40 x 500 = 20,000 kg and 40 x 1,000 = 40,000 kg.
+    expect(d.late_contracts.openOutstandingQty).toBe(20);
+    expect(d.late_contracts.totalQtyDelivery).toBe(40);
+    expect(d.all_contracts_by_status.openOutstandingQty).toBe(20);
     expect(d.lateness_distribution.onTime.qty).toBe(1);
 
     // Untouched: counts, durations and cycle days carry no "qty" in their names.
-    expect(d.late_contracts.count).toBe(254);
+    expect(d.late_contracts.count).toBe(40);
     expect(d.late_contracts.avgLogCycle).toBe(12);
     expect(d.late_contracts.maxDays).toBe(61);
     expect(d.all_contracts_by_status.openAvgLogCycle).toBe(12);
@@ -151,11 +157,11 @@ describe('the drilldown', () => {
     expect(top.level).toBe('incoterm');
     expect(top.key).toBe('FOB');
     expect(top.contracts).toBe(12);
-    expect(top.qty_delivered_mt).toBe(12_000); // 12,000,000 kg
+    expect(top.qty_mt).toBe(12_000); // 12,000,000 kg
 
     expect(top.children[0].level).toBe('group_plant');
     expect(top.children[0].key).toBe('BONTANG');
-    expect(top.children[0].qty_delivered_mt).toBe(8_000);
+    expect(top.children[0].qty_mt).toBe(8_000);
     // Pruned at the requested depth, so no product level below.
     expect(top.children[0].children).toBeUndefined();
 
@@ -163,6 +169,50 @@ describe('the drilldown', () => {
     expect(d.unscheduled_breakdown[0].key).toBe('CIF');
     expect(d.unscheduled_breakdown[0].contracts).toBe(3);
     expect(String(d.breakdown_note)).toMatch(/does not re-pivot/);
+  });
+
+  it("answers 'per plant' in one call, and reconciles with KLIP's own total", async () => {
+    /**
+     * The question a live chat got wrong on 10 Sep 2026. It looped a plant filter over
+     * ~20 plants across 25 tool calls, summed them, and reported 480,440 MT against the
+     * page's 422,442 - then built a lateness analysis on the two plants the error
+     * inflated most. group_by does it in one call from KLIP's own drilldown nodes.
+     */
+    const out = await tool.handler({ group_by: 'group_plant' } as never, ctx);
+    const d = out.data as Record<string, any>;
+
+    expect(d.grouped_by).toBe('group_plant');
+
+    const byKey = Object.fromEntries(d.groups.map((g: any) => [g.key, g.qty_mt]));
+    // BONTANG appears in BOTH the late tree (8,000 t) and the on-track tree (4,000 t).
+    // Walking only one tree would report 8,000 and look plausible.
+    expect(byKey.BONTANG).toBe(12_000);
+    expect(byKey.KARAWANG).toBe(4_000);
+    // The unscheduled tree's plant key is null. KLIP renders that as Blank, it never
+    // appears in the filter vocabulary, and a chat reported exactly this as
+    // "1,000 MT not located".
+    expect(byKey.Blank).toBe(3_000);
+
+    // 12,000 + 4,000 + 3,000 = the card. This is the invariant measured on staging.
+    expect(d.groups_total_mt).toBe(19_000);
+    expect(String(d.groups_reconciliation)).toMatch(/^Reconciles/);
+    expect(String(d.groups_note)).toMatch(/NEVER answer a per-plant question by looping/);
+  });
+
+  it('sends a YTD window by default, and only drops it when asked', async () => {
+    // Without dates KLIP applies NO window and returns all-time. Measured 10 Sep 2026:
+    // Karawang CPO read 128,462 MT with no dates against 90,885 for 1 Jan - 10 Sep.
+    state.requests.length = 0;
+    await tool.handler({} as never, ctx);
+    const call = state.requests.filter((r) => r.path.includes('late-performance')).pop();
+    expect(String(call?.query.dateFrom)).toMatch(/^\d{4}-01-01$/);
+    expect(String(call?.query.dateTo)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    state.requests.length = 0;
+    const out = await tool.handler({ all_time: true } as never, ctx);
+    const allTime = state.requests.filter((r) => r.path.includes('late-performance')).pop();
+    expect(allTime?.query.dateFrom).toBeUndefined();
+    expect(String((out.data as Record<string, any>).period_applied)).toMatch(/ALL TIME/);
   });
 
   it('asks for no tree at all by default', async () => {

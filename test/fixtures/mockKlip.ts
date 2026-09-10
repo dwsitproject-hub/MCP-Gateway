@@ -794,6 +794,14 @@ export function createMockKlip(state: MockState): Express {
               },
             ],
           },
+          {
+            key: 'KARAWANG',
+            count: 4,
+            totalDays: 16,
+            maxDays: 20,
+            totalQtyDelivery: 4_000_000,
+            children: [],
+          },
         ],
       },
     ];
@@ -813,19 +821,46 @@ export function createMockKlip(state: MockState): Express {
           openOutstandingQty: 2_000_000, closeOutstandingQty: 0,
         },
         statusCardSummary: {
-          openOutstandingQty: 6_000_000, closeContractQty: 0,
+          // 12M + 4M + 3M = the three trees, so the aggregation reconciles.
+          openOutstandingQty: 19_000_000, closeContractQty: 0,
           openOnTimeCount: 10, openLateCount: 5, closeOnTimeCount: 2, closeLateCount: 1,
           openAvgDays: 4.0, openAvgLogCycle: 12, openAvgDpCycle: 8, openAvgCashCycle: 30,
         },
         distribution: { onTime: { count: 10, qty: 1_000_000 } },
         tree,
+        /**
+         * The three trees PARTITION the open outstanding. Measured on staging 10 Sep
+         * 2026 for product CPO: late 89,409 + on-track 129,749 + unscheduled 198,211 =
+         * 417,369 MT = statusCardSummary.openOutstandingQty exactly. This fixture keeps
+         * that invariant so the reconciliation line is actually exercised, and so a
+         * per-plant aggregation that omitted a tree would fail here.
+         */
         onTrackTree: [
-          { key: 'FRC', count: 6, totalDays: 0, maxDays: 0, totalQtyDelivery: 4_000_000, children: [] },
+          {
+            key: 'FRC',
+            count: 6,
+            totalDays: 0,
+            maxDays: 0,
+            totalQtyDelivery: 4_000_000,
+            children: [
+              { key: 'BONTANG', count: 6, totalDays: 0, maxDays: 0, totalQtyDelivery: 4_000_000, children: [] },
+            ],
+          },
         ],
         // The "no data" bucket - contracts with no resolvable trade cycle, in neither
-        // the late nor the on-track counters.
+        // the late nor the on-track counters. For CPO on staging it holds nearly HALF
+        // the outstanding. Its plant child has a null key, which KLIP renders as Blank.
         unscheduledTree: [
-          { key: 'CIF', count: 3, totalDays: 0, maxDays: 0, totalQtyDelivery: 3_000_000, children: [] },
+          {
+            key: 'CIF',
+            count: 3,
+            totalDays: 0,
+            maxDays: 0,
+            totalQtyDelivery: 3_000_000,
+            children: [
+              { key: null, count: 3, totalDays: 0, maxDays: 0, totalQtyDelivery: 3_000_000, children: [] },
+            ],
+          },
         ],
       },
     });
