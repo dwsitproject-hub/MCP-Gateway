@@ -385,6 +385,68 @@ export function createMockKlip(state: MockState): Express {
    *   - data.summary carries the KLIP-computed counts, and its parts do not sum to its
    *     own total, because unplanned has no rows behind it.
    */
+  /**
+   * /quality-surveys - live since 9 Sep 2026, shape probed 10 Sep. Note moisture and
+   * impurity are SEPARATE columns: KLIP has no combined M&I, and the field map that
+   * predated the endpoint wrongly assumed one.
+   */
+  app.get('/api/quality-surveys', (req: Request, res: Response) => {
+    if (!requireAuth(req, res)) return;
+    const all = [
+      {
+        id: 'QS-1',
+        shipment_id: 'SHP-1',
+        shipment_number: '1006019001',
+        contract_number: '4700010001',
+        po_number: '1001030001',
+        vessel_name: 'MT. GIAT ARMADA 02',
+        location: 'Discharge',
+        survey_date: '2026-07-13T00:00:00.000Z',
+        surveyor: 'SUCOFINDO',
+        coa_number: 'COA-8891',
+        status: 'FINAL',
+        ffa: 3.12,
+        moisture: 0.18,
+        impurity: 0.02,
+        iv: 52.4,
+        dobi: 2.85,
+        density: 0.898,
+        color_red: 4.5,
+        dirt_sand: 0.01,
+        stone: 0,
+        surveyor_charges: 1_250_000,
+        remarks: 'Within contract limits',
+      },
+      {
+        id: 'QS-2',
+        shipment_id: 'SHP-3',
+        shipment_number: '1006019002',
+        contract_number: '4700010003',
+        po_number: '1001030003',
+        vessel_name: 'MV Sawit Jaya',
+        location: 'Loading',
+        survey_date: '2026-05-04T00:00:00.000Z',
+        surveyor: 'SGS',
+        coa_number: 'COA-8892',
+        status: 'FINAL',
+        ffa: 4.01,
+        moisture: 0.22,
+        impurity: 0.03,
+        iv: 51.1,
+        dobi: 2.6,
+        density: 0.9,
+        color_red: 5,
+        dirt_sand: 0.02,
+        stone: 0,
+        surveyor_charges: 980_000,
+        remarks: null,
+      },
+    ];
+    const contractId = req.query.contractId as string | undefined;
+    const rows = contractId === undefined ? all : all.filter((r) => r.contract_number === contractId);
+    res.json(nested('surveys', rows, req));
+  });
+
   app.get('/api/shipments', (req: Request, res: Response) => {
     if (!requireAuth(req, res)) return;
 

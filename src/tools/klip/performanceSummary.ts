@@ -47,7 +47,7 @@ import { z } from 'zod';
 import { fetchOne } from './../../adapters/klip/paginate.js';
 import type { CallRecord } from './../../adapters/klip/session.js';
 import { routes } from './../../adapters/klip/routes.js';
-import { upstreamUnavailable } from './../../core/errors.js';
+import { invalidParams, upstreamUnavailable } from './../../core/errors.js';
 import { kgToMt } from './../../adapters/klip/normalize.js';
 import * as cache from './../../core/cache.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
@@ -260,8 +260,31 @@ export const performanceSummary: ToolDefinition<typeof inputShape> = {
     // Only /data declares status. The KLIP page sends it as Open or Close, exactly -
     // any other casing matches nothing upstream and returns zeros rather than an error,
     // which is why the enum is enforced here.
+    /**
+     * status narrows the DRILLDOWN, not the cards - and only /data declares it.
+     *
+     * KLIP corrected themselves on 9 Sep 2026 after re-testing: the parameter is
+     * explicitly blanked for /late-performance/summary, because that response returns
+     * the Open card AND the Close card and so cannot pre-filter rows to one status.
+     * They measured it - openOS and closeQty identical with no status, status=Open and
+     * status=Close. It does work on the tree, where Open 36 + Close 771 = the 807
+     * returned unfiltered.
+     *
+     * So at breakdown_depth 0 this tool would send it nowhere and answer as though it
+     * had been applied. Refusing is the house rule: a filter that silently does nothing
+     * is worse than one that is absent, because the caller cannot tell.
+     */
     const statusParam = (route.params as { status?: string }).status;
-    if (params.status !== undefined && statusParam !== undefined) {
+    if (params.status !== undefined) {
+      if (statusParam === undefined) {
+        throw invalidParams(
+          'status only narrows the drilldown, not the summary cards. KLIP blanks it on the summary ' +
+            'endpoint, because that response carries both the Open and the Close card and each already ' +
+            'counts only its own side. Ask for breakdown_depth 1 or more to filter the tree by status, ' +
+            'or read the Open card, which is open-only already.',
+          { needs: 'breakdown_depth >= 1', or: 'read all_contracts_by_status.openOutstandingQty' },
+        );
+      }
       upstream[statusParam] = params.status;
     }
 

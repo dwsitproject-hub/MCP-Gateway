@@ -118,20 +118,37 @@ export interface CallRecord {
  * Authorized GET against KLIP, with the single re-login on 401.
  * Every call passes through the shared fetch semaphore.
  */
+export interface GetOptions {
+  /** Overrides KLIP_TIMEOUT_MS for this call. See KlipRequestOptions.timeoutMs. */
+  timeoutMs?: number;
+  /**
+   * Retries for this call. A slow route wants ZERO: retrying a request that timed out
+   * because the query is genuinely slow just multiplies the wait by the attempt count,
+   * so a 45 s timeout with the default two retries is a 135 s hold that fails anyway.
+   */
+  retries?: number;
+}
+
 export async function authorizedGet<T>(
   path: string,
   params: Record<string, string | number | undefined> = {},
   calls?: CallRecord[],
+  opts: GetOptions = {},
 ): Promise<T> {
   return fetchSemaphore.run(async () => {
     const token = await currentToken();
-    let res: KlipResponse<T> = await klipRequest<T>('GET', path, { params, bearerToken: token });
+    const req = {
+      params,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.retries !== undefined ? { retries: opts.retries } : {}),
+    };
+    let res: KlipResponse<T> = await klipRequest<T>('GET', path, { ...req, bearerToken: token });
 
     if (res.status === 401) {
       logger.warn({ pathname: res.pathname }, 'KLIP returned 401 - re-authenticating once');
       cached = undefined;
       const fresh = await login();
-      res = await klipRequest<T>('GET', path, { params, bearerToken: fresh });
+      res = await klipRequest<T>('GET', path, { ...req, bearerToken: fresh });
       if (res.status === 401) {
         degraded = true;
         logger.error({ pathname: res.pathname }, 'KLIP returned 401 after re-login - AUTH_DEGRADED');

@@ -26,6 +26,22 @@
 export interface RouteContract {
   /** Path relative to KLIP_BASE_URL, e.g. "/contracts". */
   path: string;
+  /**
+   * Per-route upstream timeout, overriding KLIP_TIMEOUT_MS.
+   *
+   * KLIP's endpoints differ by three orders of magnitude - 43 ms on
+   * /shipments/performance against 92 s on /trucking - so a single global ceiling either
+   * lets a hung fast route hold a connection for two minutes or fails the slow ones on
+   * every call. The latter is what happened: /shipments needs 23.5 s for 25 rows and the
+   * global limit was 15 s, so klip_shipment_status timed out every time.
+   */
+  timeoutMs?: number;
+  /**
+   * Per-route retry count. Set ZERO alongside a long timeoutMs: retrying a request that
+   * timed out because the query is slow multiplies the hold by the attempt count and
+   * fails anyway. The default of two retries turns a 45 s timeout into a 135 s wait.
+   */
+  retries?: number;
   /** Query parameter names as KLIP actually spells them. */
   params: {
     page?: string;
@@ -207,6 +223,13 @@ export const routes = {
    */
   shipments: {
     path: '/shipments',
+    // Measured 10 Sep 2026, plant=BONTANG: 5 rows 7.7 s, 25 rows 23.5 s - about 3.7 s
+    // fixed plus 790 ms PER ROW, against 240 ms/row on 28 August. KLIP attributes it to
+    // the dataset growing ~2.4x (contracts 7,216 -> 18,525) against a query that scales
+    // worse than linearly, and reports 55 s for a 100-row page on their own run.
+    // Retries are zero: a second attempt at a query this slow just doubles the wait.
+    timeoutMs: 60_000,
+    retries: 0,
     // Only what KLIP actually honours. stoNumber and vesselName are deliberately ABSENT
     // so buildFilters() routes them to its local[] fallback, where they are really applied.
     params: {
@@ -238,6 +261,11 @@ export const routes = {
 
   trucking: {
     path: '/trucking',
+    // KLIP measured /trucking?limit=20 at 92 s on a first call, 19 ms on the repeat -
+    // their keep-warm cache does hold for this route. The first call still has to be
+    // affordable, so the ceiling is generous and retries are off.
+    timeoutMs: 120_000,
+    retries: 0,
     // contractId and status are ignored upstream (5824 rows come back regardless), so
     // they are deliberately absent and fall through to local filtering.
     params: {
@@ -282,31 +310,48 @@ export const routes = {
       'dateFrom/dateTo filter contracts.contract_date, NOT the trucking operation date.',
   },
 
+  /**
+   * Quality surveys. LIVE since 9 Sep 2026 - KLIP deployed the endpoint that did not
+   * exist when this route was first written.
+   *
+   * Probed 10 Sep 2026: GET /api/quality-surveys?limit=3 answered 200 in 150 ms with
+   * { success, data: { surveys[], pagination } } over 202,338 rows. Row fields are the
+   * real laboratory set: ffa, moisture, impurity, iv, dobi, density, color_red,
+   * dirt_sand, stone, plus coa_number, surveyor, survey_date, surveyor_charges and
+   * remarks.
+   *
+   * Note moisture and impurity arrive as SEPARATE columns. The old field map expected a
+   * combined "M&I", which does not exist here - reporting one of them as M&I would
+   * understate the other.
+   */
   quality: {
-    path: '/quality',
+    path: '/quality-surveys',
+    timeoutMs: 30_000,
     params: {
       page: 'page',
       limit: 'limit',
       contractId: 'contractId',
       shipmentId: 'shipmentId',
       location: 'location',
+      vesselName: 'vessel',
+      dateFrom: 'dateFrom',
+      dateTo: 'dateTo',
     },
-    // Guessed to match the majority shape (data.<key>[] + data.pagination), which three
-    // of the five known endpoints use. Re-probe once KLIP names the real path.
-    rowsPath: 'data.quality',
+    rowsPath: 'data.surveys',
     totalPagesPath: 'data.pagination.totalPages',
-    maxLimit: 100,
+    maxLimit: 200,
     quantityUnit: 'none',
-    dateFormat: 'unknown' as const,
-    authMiddleware: 'TBD (P1)',
-    verified: false,
+    dateFormat: 'iso-date' as const,
+    authMiddleware: 'bearerAuth',
+    verified: true as const,
+    verifiedBy: 'live probe against KLIP staging via the frontend session',
+    verifiedOn: '2026-09-10',
     notes:
-      'NO ENDPOINT EXISTS. Confirmed by the KLIP team 27 Aug 2026: there is no /api/quality* route and no ' +
-      'REST handler over quality_surveys anywhere in the codebase. Quality data is reachable only through ' +
-      'the pages that render it. Nineteen probed paths returned 404 because none of them exist, not ' +
-      'because the spelling was wrong. Logged as KLIP work, not a connector defect. ' +
-      'NOT the same thing as /oil-loss, which is gain/loss on movements - see the oilLoss route. ' +
-      'Pointing this tool at oil-loss would report one measurement under the name of another.',
+      'GET /api/quality-surveys. Envelope data.surveys[] + data.pagination{}. 202,338 rows, so a filter is ' +
+      'effectively required. limit defaults to 50 upstream and caps at 200. Measurements are laboratory ' +
+      'values in their own units - percentages and index numbers - and must never be unit-converted. ' +
+      'moisture and impurity are separate columns; there is no combined M&I field. The KLIP team supplied ' +
+      'the parameter list and it matched the probe.',
   },
 
   /**

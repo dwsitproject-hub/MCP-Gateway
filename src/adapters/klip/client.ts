@@ -87,6 +87,17 @@ export interface KlipRequestOptions {
   bearerToken?: string | undefined;
   /** GET requests retry; the login POST never does. */
   retries?: number;
+  /**
+   * Per-request timeout, overriding KLIP_TIMEOUT_MS.
+   *
+   * One global value cannot cover this API. Measured on staging 10 Sep 2026:
+   * /shipments/performance answers in 43 ms while /trucking?limit=20 takes 92 s and
+   * /shipments?plant=BONTANG&limit=25 takes 23.5 s. A ceiling high enough for the slow
+   * routes would let a hung fast route sit for two minutes; a ceiling tight enough for
+   * the fast ones fails the slow ones outright, which is what happened - the shipments
+   * tool timed out on every call against a 15 s limit.
+   */
+  timeoutMs?: number;
 }
 
 export interface KlipResponse<T = unknown> {
@@ -132,6 +143,7 @@ export async function klipRequest<T = unknown>(
         ...(method === 'POST' ? { data: opts.body } : {}),
         headers,
         validateStatus: () => true,
+        ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
       } as never);
 
       const durationMs = Date.now() - started;

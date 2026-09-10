@@ -75,7 +75,17 @@ const inputShape = {
     .boolean()
     .default(false)
     .describe('Keep only shipments still in progress, and sort the most overdue first.'),
-  limit: z.number().int().min(1).max(CAP).default(20).describe(`How many shipments to list (max ${CAP}).`),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(CAP)
+    .default(10)
+    .describe(
+      `How many shipments to list (max ${CAP}). Each row costs about 0.8 s upstream, so ask for what ` +
+        'you will actually read. KLIP\'s status counts do not depend on this - they cover the whole ' +
+        'filtered set however few rows are fetched.',
+    ),
 };
 
 /** Whole days from `iso` to `asOf`; positive means `iso` is in the past. */
@@ -130,12 +140,40 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
     const filters = buildFilters(route, filterInput);
 
     /**
-     * 25 rows a page, up to 8 pages.
+     * vessel_name and sto_number go upstream as `search`, which KLIP honours.
      *
-     * /shipments costs about 240 ms per row upstream, so the default 100-row page took
-     * 16-18 s against a 15 s timeout and this tool failed with UPSTREAM_UNAVAILABLE on
-     * every call - reported by the user three times, and visible in an earlier chat as
-     * "the endpoint timed out three times before responding". Filtering does not help:
+     * Measured 10 Sep 2026: search=EIHO returns total=1 with vessel_name EIHO, while
+     * vesselName=EIHO still returns all 337 rows. So `search` is the parameter that
+     * works, and using it fixes more than speed - local-only filtering could see a
+     * vessel just once in the page it happened to fetch, and report "not found" for one
+     * sitting on page two. The local pass below is kept as a precision filter, because
+     * `search` matches other columns too.
+     */
+    const searchParam = route.params.search;
+    const searchTerm = params.vessel_name ?? params.sto_number;
+    if (searchParam !== undefined && searchTerm !== undefined) {
+      filters.upstream[searchParam] = searchTerm;
+    }
+
+    /**
+     * ONE page, sized to what will be displayed.
+     *
+     * Revised 10 Sep 2026, and it reverses the previous fix. That version asked for 25
+     * rows across up to 8 pages, on a measured cost of 240 ms per row. The cost is now
+     * 790 ms per row - KLIP puts it down to the dataset growing about 2.4x against a
+     * query that scales worse than linearly - so eight pages is eight calls of 23 s
+     * each, every one of them over the old 15 s ceiling. The tool timed out on every
+     * call.
+     *
+     * Two things changed instead of shrinking the page further. The route now carries
+     * its own 60 s timeout, because no single global value fits an API spanning 43 ms to
+     * 92 s. And only ONE page is fetched, sized to the caller's limit, because the
+     * figures that matter - KLIP's status cards, the eta buckets, the port breakdowns -
+     * come from data.summary, which covers the whole filtered set no matter how few rows
+     * are returned. Paying 790 ms a row for rows nobody displays bought nothing.
+     *
+     * Historical note on the original diagnosis, which still holds: filtering does not
+     * help the per-row cost:
      * plant=Bontang at 100 rows still took 16.3 s, because the cost is per row returned,
      * not per row scanned.
      *
@@ -145,7 +183,7 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
      * and truncates honestly on an unfiltered call, where KLIP holds 428.
      */
     const cached = await cache.through(cache.keyFor('klip_shipment_status', { ...filterInput }), async () =>
-      walk<Row>({ route, filters: filters.upstream, maxPages: 8, pageSize: 25 }),
+      walk<Row>({ route, filters: filters.upstream, maxPages: 1, pageSize: params.limit }),
     );
     const walked = cached.value;
 

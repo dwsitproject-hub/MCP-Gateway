@@ -376,19 +376,44 @@ describe('injection drill (S2, TSD Section 13)', () => {
 
 // ---------------------------------------------------------------------------
 describe('unit discipline', () => {
-  it('refuses quality surveys as UNAVAILABLE rather than reporting an empty result', async () => {
-    // KLIP exposes no /api/quality* route (confirmed 27 Aug 2026). Walking a 404 yielded
-    // an empty row set, which this tool reported as "no surveys matched" - a claim about
-    // the cargo, when the truth is a claim about the connector. The distinction matters
-    // most to whoever is trying to establish whether a cargo was ever tested.
-    await expect(run('klip_quality_surveys', { contract_id: '4700010001' })).rejects.toMatchObject({
-      code: 'CAPABILITY_UNAVAILABLE',
-    });
+  it('reads quality surveys now that KLIP has shipped the endpoint', async () => {
+    // This tool refused for two weeks because /api/quality* did not exist - confirmed by
+    // the KLIP team on 27 Aug 2026. They deployed it on 9 Sep; re-probed on 10 Sep before
+    // re-enabling, rather than switching it on because a document said so.
+    const { outcome } = await run('klip_quality_surveys', { contract_id: '4700010001' });
+    const data = outcome.data as {
+      surveys: Array<{
+        ffa_pct: number | null;
+        moisture_pct: number | null;
+        impurity_pct: number | null;
+        dobi: number | null;
+        survey_date: string | null;
+        surveyor: string | null;
+      }>;
+      moisture_impurity_note: string;
+    };
+
+    expect(data.surveys).toHaveLength(1);
+    const s = data.surveys[0];
+    expect(s?.surveyor).toBe('SUCOFINDO');
+    expect(s?.survey_date).toBe('2026-07-13');
+
+    // Laboratory values pass through unconverted - running any of these through kgToMt
+    // would be the classic unit accident, and 3.12 would become 0.00312.
+    expect(s?.ffa_pct).toBe(3.12);
+    expect(s?.dobi).toBe(2.85);
+
+    // Moisture and impurity are SEPARATE columns. The field map written before the
+    // endpoint existed expected one combined "M&I", which would have dropped one of them.
+    expect(s?.moisture_pct).toBe(0.18);
+    expect(s?.impurity_pct).toBe(0.02);
+    expect(String(data.moisture_impurity_note)).toMatch(/never add them/);
   });
 
-  it('says plainly that the absence is the connector, not the data', async () => {
-    const err = await run('klip_quality_surveys', { contract_id: '4700010001' }).catch((e: Error) => e);
-    expect(String((err as Error).message)).toContain('not a statement that no survey exists');
+  it('still refuses an unfiltered quality query rather than returning an arbitrary page', async () => {
+    // KLIP holds 202,338 surveys. An unfiltered request would return page one of them,
+    // which is not an answer to anything.
+    await expect(run('klip_quality_surveys', {})).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
   });
 
   it('does not run payment amounts through the kg-to-MT conversion', async () => {

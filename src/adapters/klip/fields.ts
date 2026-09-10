@@ -214,18 +214,38 @@ export const fields = {
     truckNumber: ['truckNumber', 'truck_number', 'plateNumber'],
   },
 
+  /**
+   * Quality surveys. Names read from a live payload on 10 Sep 2026, so exact rather
+   * than guessed - the previous map was written before the endpoint existed.
+   *
+   * moisture and impurity are SEPARATE columns. The old map had a single `mi` for a
+   * combined M&I, which KLIP does not have; reporting either column under that name
+   * would silently drop the other.
+   */
   quality: {
-    id: ['id', 'qualityId', 'surveyId'],
-    shipmentId: ['shipmentId', 'shipment_id'],
-    contractId: ['contractId', 'contract_id'],
-    stoNumber: ['stoNumber', 'sto_number', 'sto'],
-    location: ['location', 'surveyLocation', 'point', 'lokasi'],
-    surveyDate: ['surveyDate', 'survey_date', 'tanggalSurvey', 'date'],
-    surveyor: ['surveyor', 'surveyorName', 'inspector'],
-    ffa: ['ffa', 'FFA', 'ffaValue'],
-    mi: ['mi', 'MI', 'mAndI', 'm_and_i', 'moistureImpurities'],
-    iv: ['iv', 'IV', 'iodineValue'],
-    dobi: ['dobi', 'DOBI', 'dobiValue'],
+    id: ['id'],
+    shipmentId: ['shipment_id'],
+    shipmentNumber: ['shipment_number'],
+    contractNumber: ['contract_number'],
+    poNumber: ['po_number'],
+    vesselName: ['vessel_name'],
+    location: ['location'],
+    surveyDate: ['survey_date'],
+    surveyor: ['surveyor'],
+    coaNumber: ['coa_number'],
+    status: ['status'],
+    /** Laboratory values, each in its own unit. Never unit-convert these. */
+    ffa: ['ffa'],
+    moisture: ['moisture'],
+    impurity: ['impurity'],
+    iv: ['iv'],
+    dobi: ['dobi'],
+    density: ['density'],
+    colorRed: ['color_red'],
+    dirtSand: ['dirt_sand'],
+    stone: ['stone'],
+    surveyorCharges: ['surveyor_charges'],
+    remarks: ['remarks'],
   },
 
   payment: {

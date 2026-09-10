@@ -139,7 +139,11 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
   const firstParams = { ...baseParams };
   if (pageParam !== undefined) firstParams[pageParam] = 1;
 
-  const firstBody = await authorizedGet<unknown>(route.path, firstParams, calls);
+  const reqOpts = {
+    ...(route.timeoutMs !== undefined ? { timeoutMs: route.timeoutMs } : {}),
+    ...(route.retries !== undefined ? { retries: route.retries } : {}),
+  };
+  const firstBody = await authorizedGet<unknown>(route.path, firstParams, calls, reqOpts);
   const firstRows = extractRows<T>(firstBody, route.rowsPath);
 
   const totalPages = extractNumber(firstBody, route.totalPagesPath, TOTAL_PAGES_ALTERNATES);
@@ -173,7 +177,7 @@ export async function walk<T>(opts: WalkOptions): Promise<PageWalk<T>> {
   const remaining = Array.from({ length: pagesToFetch - 1 }, (_, i) => i + 2);
   const pages = await mapLimit(remaining, cfg.KLIP_FETCH_CONCURRENCY, async (pageNumber) => {
     const params = { ...baseParams, [pageParam]: pageNumber };
-    const body = await authorizedGet<unknown>(route.path, params, calls);
+    const body = await authorizedGet<unknown>(route.path, params, calls, reqOpts);
     return extractRows<T>(body, route.rowsPath);
   });
 
@@ -212,8 +216,9 @@ export async function fetchOne<T>(
   path: string,
   extractPath = 'data',
   calls?: CallRecord[],
+  opts: { timeoutMs?: number; retries?: number } = {},
 ): Promise<T | undefined> {
-  const body = await fetchEnvelope(path, calls);
+  const body = await fetchEnvelope(path, calls, opts);
   if (body === undefined) return undefined;
   if (typeof body === 'object' && !Array.isArray(body)) {
     const wrapped = dig(body, extractPath);
@@ -230,8 +235,12 @@ export async function fetchOne<T>(
  * plus matched_by and match_count. Fetching the envelope once and reading all of it beats
  * three more round trips for data already in hand.
  */
-export async function fetchEnvelope(path: string, calls?: CallRecord[]): Promise<unknown | undefined> {
-  const body = await authorizedGet<unknown>(path, {}, calls);
+export async function fetchEnvelope(
+  path: string,
+  calls?: CallRecord[],
+  opts: { timeoutMs?: number; retries?: number } = {},
+): Promise<unknown | undefined> {
+  const body = await authorizedGet<unknown>(path, {}, calls, opts);
   if (body === undefined || body === null) return undefined;
   return body;
 }
