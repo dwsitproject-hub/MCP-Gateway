@@ -115,7 +115,13 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
       'if a source is stale the moved quantity has stopped advancing while the vessel kept working, and ' +
       'the tonnage must be quoted with that caveat. ' +
       'A null timestamp means the milestone is not recorded in JPS, which is NOT the same as the event ' +
-      'not having happened.',
+      'not having happened. ' +
+      'NOT KLIP. This is the jetty, not the contract pipeline: klip_shipment_status answers shipment ' +
+      'status across plants and its "at discharge port" bucket is a pipeline stage rather than a berth. ' +
+      'The two lists genuinely differ - measured 11 Sep 2026, JPS had 4 vessels alongside while KLIP ' +
+      'showed 12 as berthed or unloading, overlapping on only 2. THERE IS NO JOIN KEY between the ' +
+      'systems today, so never merge or reconcile the two lists: say which system a figure came from ' +
+      'and stop there.',
     `Returns at most ${CAP} vessels.`,
   ),
   inputShape,

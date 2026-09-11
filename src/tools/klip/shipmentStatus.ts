@@ -105,10 +105,15 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
       'Status counts - unplanned, preplanned, planned, at loading port, sailed, at discharge port, ' +
       'completed, cancelled - with the vessels sitting in each. Filter by plant, status, contract, ' +
       'vessel, STO, supplier, product or contract date. ' +
-      'Use this for "shipment status", "where is vessel X", "how many shipments at PLANT" and anything ' +
-      'about the delivery window; klip_shipping_performance is the separate Shipping Performance page ' +
-      'and reports milestone DELAYS in days, not status. The two report different row sets and must not ' +
-      'be mixed. ' +
+      'Use this for "shipment status", "how many shipments at PLANT" and anything about the delivery ' +
+      'window; klip_shipping_performance is the separate Shipping Performance page and reports milestone ' +
+      'DELAYS in days, not status. The two report different row sets and must not be mixed. ' +
+      'NOT THE BERTH. This is contract-and-STO level shipment status across plants, and its ' +
+      'at-discharge-port bucket is a pipeline stage, not a vessel physically alongside a jetty right ' +
+      'now - rows here can carry a discharge-complete date months old and still read as unloading. For ' +
+      'what is at a berth NOW - alongside, berthed, NOR, laytime, cast-off, cargo operations, ATG - use ' +
+      'jetty_at_berth, which reads the Jetty Planning System. The two answer different questions about ' +
+      'different vessels and their lists do not agree; never present one as the other. ' +
       'Milestones are a LADDER, not an ETA/ETD pair: arrival at the loading port, berthing, loading ' +
       'complete, sailing, then the discharge side, each with an estimate and an actual. An estimated ' +
       'arrival that precedes an estimated sailing is CORRECT - they are the two ends of the loading ' +
