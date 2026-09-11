@@ -107,6 +107,33 @@ export interface SearchHit extends KnowledgeEntry {
 }
 
 /**
+ * How a result set was found. Reported so a broad match is never presented as a
+ * precise one - the same rule the rest of this connector follows about coverage.
+ */
+export type MatchMode = 'exact' | 'broadened' | 'substring';
+
+export interface SearchResult {
+  hits: SearchHit[];
+  match: MatchMode;
+}
+
+/**
+ * Terms joined with OR, for the broadened pass.
+ *
+ * Sanitised to letters and digits because the string goes into to_tsquery, which
+ * parses operators - an unescaped `&` or `!` from a user's question would be a
+ * syntax error rather than a search. Single characters are dropped as noise.
+ */
+function orTsQuery(text: string): string | null {
+  const terms = text
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 1)
+    .slice(0, 12);
+  return terms.length === 0 ? null : terms.join(' | ');
+}
+
+/**
  * Full-text search, verified entries boosted above proposed. Deprecated entries
  * are excluded unless explicitly requested. Falls back to substring match when
  * the websearch query yields nothing (short or misspelled queries).
@@ -114,7 +141,7 @@ export interface SearchHit extends KnowledgeEntry {
 export async function search(
   rawQuery: string,
   opts: { topic?: string | undefined; includeDeprecated?: boolean | undefined; limit?: number | undefined } = {},
-): Promise<SearchHit[]> {
+): Promise<SearchResult> {
   const text = cleanText(rawQuery, LIMITS.searchQuery);
   if (text === '') throw invalidParams('query must not be empty.');
   const limit = Math.min(Math.max(opts.limit ?? 8, 1), 25);
@@ -136,7 +163,38 @@ export async function search(
   );
   if (ftsRows.length > 0) {
     void bumpUsage(ftsRows.map((r) => r.id));
-    return ftsRows;
+    return { hits: ftsRows, match: 'exact' };
+  }
+
+  /**
+   * BROADENED: the same terms joined with OR.
+   *
+   * websearch_to_tsquery ANDs bare words, so "vessel berthing occupancy" matched only
+   * an entry containing all three - one of eleven jetty entries, when several were
+   * relevant. The only fallback was an ILIKE on the WHOLE query string, which needs
+   * that exact phrase to appear verbatim and so almost never fires for a real
+   * question. A knowledge base whose entries cannot be found is worth nothing, and
+   * this was silently true of the KLIP entries too.
+   */
+  const orQuery = orTsQuery(text);
+  if (orQuery !== null) {
+    const orRows = await query<SearchHit>(
+      `SELECT ${ENTRY_COLUMNS},
+              ts_rank(search, to_tsquery('english', $1))
+                + CASE status WHEN 'verified' THEN 0.5 ELSE 0 END
+                + LEAST(helpful_count, 5) * 0.05 AS rank
+       FROM knowledge_entries
+       WHERE status = ANY($2)
+         AND ($3::text IS NULL OR lower(topic) = $3)
+         AND search @@ to_tsquery('english', $1)
+       ORDER BY rank DESC, updated_at DESC
+       LIMIT $4`,
+      [orQuery, statuses, topic, limit],
+    );
+    if (orRows.length > 0) {
+      void bumpUsage(orRows.map((r) => r.id));
+      return { hits: orRows, match: 'broadened' };
+    }
   }
 
   const likeRows = await query<SearchHit>(
@@ -150,7 +208,7 @@ export async function search(
     [text, statuses, topic, limit],
   );
   void bumpUsage(likeRows.map((r) => r.id));
-  return likeRows;
+  return { hits: likeRows, match: 'substring' };
 }
 
 /** Usage stats feed curation ("what gets asked") — best-effort, never blocks a read. */

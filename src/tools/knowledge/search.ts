@@ -41,7 +41,7 @@ export const knowledgeSearch: ToolDefinition<typeof inputShape> = {
   inputShape,
   cap: 25,
   handler: async (params, _ctx: ToolContext): Promise<ToolOutcome> => {
-    const hits = await knowledge.search(params.query, {
+    const { hits, match } = await knowledge.search(params.query, {
       topic: params.topic,
       includeDeprecated: params.include_deprecated,
       limit: params.limit,
@@ -60,6 +60,22 @@ export const knowledgeSearch: ToolDefinition<typeof inputShape> = {
           helpful_count: h.helpful_count,
           updated_at: h.updated_at,
         })),
+        /**
+         * How the entries were found, so a loose match is never read as a precise one.
+         * `exact` means every term matched; `broadened` means the terms were OR'd
+         * because nothing matched them all, so an entry here may be only adjacent to
+         * the question.
+         */
+        match_mode: match,
+        ...(match === 'exact'
+          ? {}
+          : {
+              match_note:
+                match === 'broadened'
+                  ? 'No entry matched every term, so these matched SOME of them and may be only related ' +
+                    'to the question rather than an answer to it. Read before quoting.'
+                  : 'Matched as a substring of the whole phrase, not by meaning. Treat as a weak match.',
+            }),
         status_legend:
           'verified = confirmed by at least two people or seeded by a curator; ' +
           'proposed = saved by an AI and NOT yet confirmed - quote with a caveat; ' +

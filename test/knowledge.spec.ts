@@ -190,10 +190,43 @@ describe('search', () => {
       if (sql.includes('websearch_to_tsquery')) return [entryRow({ status: 'verified' })];
       return [];
     };
-    const hits = await knowledge.search('group plant');
+    const { hits, match } = await knowledge.search('group plant');
     expect(hits).toHaveLength(1);
+    expect(match).toBe('exact');
     // fire-and-forget usage bump was issued
     expect(calls.some((c) => c.sql.includes('use_count = use_count + 1'))).toBe(true);
+  });
+
+  it('broadens to an OR of the terms before giving up on meaning', async () => {
+    /**
+     * websearch_to_tsquery ANDs bare words, so a three-word question found nothing
+     * unless one entry carried every term - true of the KLIP entries all along, and it
+     * would have made the eleven new jetty entries largely unreachable. The only
+     * fallback was an ILIKE on the whole phrase, which needs it verbatim.
+     */
+    responder = (sql) => {
+      if (sql.includes('websearch_to_tsquery')) return [];
+      if (sql.includes('to_tsquery')) return [entryRow({ status: 'verified' })];
+      return [];
+    };
+    const { hits, match } = await knowledge.search('vessel berthing occupancy');
+    expect(hits).toHaveLength(1);
+    expect(match).toBe('broadened');
+    const or = calls.find((c) => c.sql.includes('to_tsquery') && !c.sql.includes('websearch_to_tsquery'));
+    expect(String(or?.params[0])).toBe('vessel | berthing | occupancy');
+  });
+
+  it('keeps punctuation out of the broadened query, which to_tsquery would parse', async () => {
+    // to_tsquery reads &, |, ! and ( ) as operators, so an unescaped question mark or
+    // ampersand from a user would be a syntax error rather than a search.
+    responder = (sql) => {
+      if (sql.includes('websearch_to_tsquery')) return [];
+      if (sql.includes('to_tsquery')) return [entryRow()];
+      return [];
+    };
+    await knowledge.search("what's ETC & NOR? (laytime)");
+    const or = calls.find((c) => c.sql.includes('to_tsquery') && !c.sql.includes('websearch_to_tsquery'));
+    expect(String(or?.params[0])).toBe('what | ETC | NOR | laytime');
   });
 
   it('falls back to substring match when full-text yields nothing', async () => {
@@ -202,8 +235,9 @@ describe('search', () => {
       if (sql.includes('ILIKE')) return [entryRow()];
       return [];
     };
-    const hits = await knowledge.search('grp plnt');
+    const { hits, match } = await knowledge.search('grp plnt');
     expect(hits).toHaveLength(1);
+    expect(match).toBe('substring');
   });
 
   it('excludes deprecated entries unless asked', async () => {
