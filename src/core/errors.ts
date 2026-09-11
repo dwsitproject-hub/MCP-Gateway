@@ -98,11 +98,21 @@ export const upstreamAuth = (): GatewayError =>
  * account, when the account is fine and the route map is wrong - which is precisely the
  * gap TSD Appendix A exists to close.
  */
-export const upstreamRouteMissing = (path: string, status: number): GatewayError =>
+/**
+ * `system` and `routeFile` default to KLIP so the existing message is byte-identical;
+ * the JPS adapter passes its own, rather than telling an operator to fix a KLIP file
+ * for a Jetty route.
+ */
+export const upstreamRouteMissing = (
+  path: string,
+  status: number,
+  system = 'KLIP',
+  routeFile = 'src/adapters/klip/routes.ts',
+): GatewayError =>
   new GatewayError(
     'UPSTREAM_ROUTE_MISSING',
-    `KLIP has no route at "${path}" (HTTP ${status}). This is a route-map error, not a credentials problem: ` +
-      'correct the path in src/adapters/klip/routes.ts. Check whether the base URL needs an /api prefix.',
+    `${system} has no route at "${path}" (HTTP ${status}). This is a route-map error, not a credentials problem: ` +
+      `correct the path in ${routeFile}. Check whether the base URL needs an /api prefix.`,
     { retryable: false, severity: 'high' },
   );
 

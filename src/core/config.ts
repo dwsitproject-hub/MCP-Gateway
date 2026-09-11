@@ -82,6 +82,23 @@ const Env = z.object({
   KLIP_SVC_PASS: z.string().min(12),
   KLIP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
+  /**
+   * Jetty Planning System (JPS). ALL OPTIONAL, so a gateway with no JPS configured
+   * boots exactly as before - the jetty adapter refuses at call time instead, which
+   * keeps a missing integration from taking KLIP down with it.
+   *
+   * JETTY_PORT_ID is required in practice rather than in the schema: JPS scopes every
+   * request to a port and a figure without one is meaningless. Staging has a single
+   * port (BONTANG, id 1), which is also why port scoping could not be properly tested -
+   * see src/adapters/jetty/routes.ts.
+   */
+  JETTY_ENV: z.enum(['staging', 'production']).optional(),
+  JETTY_BASE_URL: z.string().url().optional(),
+  JETTY_SVC_USER: z.string().min(1).optional(),
+  JETTY_SVC_PASS: z.string().min(8).optional(),
+  JETTY_PORT_ID: z.coerce.number().int().positive().optional(),
+  JETTY_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+
   OAUTH_SIGNING_KEY_PATH: z.string().min(1),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
@@ -203,6 +220,15 @@ export type Config = z.infer<typeof Env> & {
 const PLACEHOLDERS = ['changeme', 'change-me', 'your-secret', 'yoursecret', 'example', 'placeholder', 'todo', 'xxxx', 'secret123'];
 const WEAK_VALUES = ['password', 'postgres', 'admin', 'secret', 'test', '12345678'];
 const SECRET_KEYS = ['KLIP_SVC_PASS', 'DATABASE_URL'] as const;
+/**
+ * Secrets for OPTIONAL integrations: checked for weakness only when present.
+ *
+ * Putting JETTY_SVC_PASS in SECRET_KEYS made an unset value read as "empty" and exited
+ * at boot - so adding an optional integration would have stopped every existing
+ * production gateway from starting, before it even reached the Hub TLS check. An
+ * integration nobody has configured must not be able to take the gateway down.
+ */
+const OPTIONAL_SECRET_KEYS = ['JETTY_SVC_PASS'] as const;
 
 function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
   if (cfg.NODE_ENV !== 'production') return;
@@ -211,6 +237,15 @@ function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
     const value = String(cfg[key] ?? '');
     const lower = value.toLowerCase();
     if (value.trim() === '') problems.push(`${key} is empty`);
+    else if (PLACEHOLDERS.some((p) => lower.includes(p))) problems.push(`${key} contains a placeholder value`);
+    else if (WEAK_VALUES.includes(lower)) problems.push(`${key} is a well-known weak value`);
+  }
+  // Present-or-absent, never "empty": absence means the integration is not configured.
+  for (const key of OPTIONAL_SECRET_KEYS) {
+    const raw = cfg[key];
+    if (raw === undefined) continue;
+    const lower = String(raw).toLowerCase();
+    if (String(raw).trim() === '') problems.push(`${key} is set but empty`);
     else if (PLACEHOLDERS.some((p) => lower.includes(p))) problems.push(`${key} contains a placeholder value`);
     else if (WEAK_VALUES.includes(lower)) problems.push(`${key} is a well-known weak value`);
   }

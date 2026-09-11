@@ -36,6 +36,27 @@ function boot(env: Record<string, string>): { status: number; output: string } {
 const HTTP_HUB = 'http://test-dwshub.example.com';
 const HTTPS_HUB = 'https://test-dwshub.example.com';
 
+describe('an optional integration must not block boot', () => {
+  /**
+   * JETTY_* is optional so a gateway with no JPS configured runs exactly as before.
+   * Adding JETTY_SVC_PASS to the production secret checks broke that: an UNSET value
+   * read as "empty" and exited at startup, which would have stopped every existing
+   * production gateway - and it failed BEFORE the Hub TLS check, so the symptom looked
+   * nothing like the cause. Optional secrets are now checked only when present.
+   */
+  it('boots in production with no JPS configuration at all', () => {
+    const a = boot({ HUB_ISSUER: HTTPS_HUB });
+    expect(a.output).toContain('BOOTED');
+    expect(a.output).not.toContain('JETTY_SVC_PASS');
+  });
+
+  it('still rejects a WEAK JPS password once one is actually set', () => {
+    const a = boot({ HUB_ISSUER: HTTPS_HUB, JETTY_SVC_PASS: 'password' });
+    expect(a.status).not.toBe(0);
+    expect(a.output).toContain('JETTY_SVC_PASS');
+  });
+});
+
 describe('a plaintext Hub', () => {
   it('is REFUSED by default, rather than quietly trusted', () => {
     const a = boot({ HUB_ISSUER: HTTP_HUB });
