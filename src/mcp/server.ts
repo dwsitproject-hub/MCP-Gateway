@@ -21,6 +21,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { klipTools } from './../tools/klip/index.js';
 import { knowledgeTools } from './../tools/knowledge/index.js';
+import { jettyTools } from './../tools/jetty/index.js';
 import type { InputShape, ToolDefinition } from './../tools/klip/types.js';
 import { envelopeShape } from './envelope.js';
 import { runTool } from './runner.js';
@@ -107,6 +108,10 @@ export function createServer(identity: RequestIdentity, knowledgeInstructions = 
 
   for (const def of klipTools) register(server, def as ToolDefinition<InputShape>, identity);
   for (const def of knowledgeTools) register(server, def as ToolDefinition<InputShape>, identity);
+  // Empty unless JETTY_* is configured - see tools/jetty/index.ts. A tool that cannot
+  // reach its upstream is not advertised, so its absence reads as absence rather than
+  // as a broken tool.
+  for (const def of jettyTools) register(server, def as ToolDefinition<InputShape>, identity);
   return server;
 }
 

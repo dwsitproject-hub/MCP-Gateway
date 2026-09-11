@@ -151,6 +151,15 @@ export interface JettyResponse<T = unknown> {
   data: T;
   durationMs: number;
   pathname: string;
+  /**
+   * Response headers, lower-cased by axios.
+   *
+   * Carried because the JPS credential arrives ONLY in Set-Cookie - the login body
+   * holds a user profile and no token. Without this the session could never find the
+   * cookie and every login would fail with "no bearer token found", which is a
+   * confusing way to say "the client dropped the header".
+   */
+  headers: Record<string, unknown>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,7 +210,13 @@ export async function jettyRequest<T = unknown>(
         throw upstreamUnavailable(lastError);
       }
 
-      return { status: res.status, data: res.data, durationMs, pathname: resolved.pathname };
+      return {
+        status: res.status,
+        data: res.data,
+        durationMs,
+        pathname: resolved.pathname,
+        headers: (res.headers ?? {}) as Record<string, unknown>,
+      };
     } catch (err) {
       if (err instanceof GuardError) throw err;
       const asError = err as { code?: string; message?: string };

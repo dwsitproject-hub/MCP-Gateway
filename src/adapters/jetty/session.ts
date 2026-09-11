@@ -161,9 +161,9 @@ async function login(): Promise<string> {
     throw upstreamAuth();
   }
 
-  const setCookie = ((res as unknown as { headers?: Record<string, unknown> }).headers?.['set-cookie'] ??
-    []) as readonly string[];
-  const found = extractToken(res, Array.isArray(setCookie) ? setCookie : [String(setCookie)]);
+  const raw = res.headers['set-cookie'];
+  const setCookie: readonly string[] = Array.isArray(raw) ? (raw as string[]) : raw === undefined ? [] : [String(raw)];
+  const found = extractToken(res, setCookie);
 
   if (found === null) {
     degraded = true;

@@ -23,4 +23,5 @@ export const PORTS = {
   vocabulary: 5198,
   performanceSummary: 5199,
   shippingPerformance: 5200,
+  jettyAtBerth: 5201,
 } as const;

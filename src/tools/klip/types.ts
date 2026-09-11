@@ -35,6 +35,15 @@ export interface ToolOutcome {
   /** KLIP endpoints actually hit, for the audit record. Paths only, never query strings. */
   klipCalls: CallRecord[];
   /**
+   * Which upstream answered. Omitted means KLIP, so every existing tool is unchanged.
+   *
+   * The envelope's _integrity, source and environment are provenance claims, and a
+   * Jetty result carrying "Data from KLIP" would be a false one - with two upstreams
+   * behind one connector, this field is the only thing telling a reader which system
+   * produced the number in front of them.
+   */
+  system?: 'klip' | 'jetty' | undefined;
+  /**
    * Overrides the envelope's default next_step.
    *
    * The default assumes truncated means the FIGURES are partial. That is no longer true
