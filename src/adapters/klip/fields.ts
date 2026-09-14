@@ -187,7 +187,6 @@ export const fields = {
 
   trucking: {
     id: ['id', 'truckingId', 'trucking_id'],
-    sequence: ['sequence', 'seq', 'urutan', 'sequenceNo'],
     contractId: ['contractId', 'contract_id'],
     plant: ['location', 'loading_location', 'plant', 'plantName'],
     sentDate: ['trucking_start_date', 'realization_start_date', 'sentDate', 'sent_date'],
@@ -211,7 +210,6 @@ export const fields = {
       * movements, so there is no plate number to report. Left in place so the reader
       * returns null rather than inventing one; the tool description should not promise it.
       */
-    truckNumber: ['truckNumber', 'truck_number', 'plateNumber'],
   },
 
   /**
@@ -414,13 +412,11 @@ export const fields = {
     // status, total_records, processed_records, failed_records.
     startedAt: ['import_timestamp', 'import_date', 'startedAt', 'started_at'],
     /** NOT PRESENT - KLIP reports no completion time. Always null; do not imply duration. */
-    finishedAt: ['finishedAt', 'finished_at', 'completedAt'],
     status: ['status', 'importStatus', 'import_status'],
     rowsProcessed: ['processed_records', 'total_records', 'rowsProcessed', 'rows_processed'],
     rowsFailed: ['failed_records', 'rowsFailed', 'rows_failed'],
     /** NOT PRESENT on live rows. */
     fileName: ['fileName', 'file_name', 'file'],
     /** NOT PRESENT on live rows. */
-    message: ['message', 'errorMessage', 'error_message'],
   },
 } as const;

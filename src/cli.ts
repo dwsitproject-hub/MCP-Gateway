@@ -515,56 +515,58 @@ const FIELD_MAPS: Array<[string, keyof typeof fields]> = [
 async function cmdRoutesVerifyFields(): Promise<void> {
   out(`Deep-probing ${cfg.KLIP_BASE_URL} (KLIP_ENV=${cfg.KLIP_ENV})\n`);
   const all = routes as Record<string, RouteContract>;
-  let sampleContractId: string | undefined;
-  let sampleNumericId: string | undefined;
+  const sampleIds: string[] = [];
 
   const SCAN = 50;
+  /**
+   * A detail endpoint returns ONE row per id, so probing it once cannot tell an absent
+   * field from a null one - the same trap the 50-row scan exists to avoid, and it does
+   * not go away just because the route only ever yields a single record. Ten different
+   * contracts is a sample; one is an anecdote.
+   */
+  const DETAIL_SAMPLE = 10;
 
   for (const [name, mapKey] of FIELD_MAPS) {
     const route = all[name];
     if (route === undefined) continue;
     const map = fields[mapKey] as unknown as Record<string, string[]>;
 
-    let path = route.path;
+    const path = route.path;
     const params: Record<string, string | number> = {};
     if (route.params.limit !== undefined) params[route.params.limit] = SCAN;
     if (route.params.page !== undefined) params[route.params.page] = 1;
 
-    // contractById takes a path id, and WHICH id is the open question: contract rows
-    // carry both a numeric `id` and a string `contract_id`. Trying one and reporting
-    // EMPTY cannot tell "wrong id" apart from "wrong rowsPath", so try both.
-    const idCandidates = path.includes(':')
-      ? [sampleNumericId, sampleContractId].filter((v): v is string => v !== undefined)
-      : [undefined];
-    if (path.includes(':') && idCandidates.length === 0) {
-      out(`${name.padEnd(22)} SKIP  (no sample id available from /contracts)`);
+    const isDetail = path.includes(':');
+    const probeIds: Array<string | undefined> = isDetail ? sampleIds.slice(0, DETAIL_SAMPLE) : [undefined];
+    if (isDetail && probeIds.length === 0) {
+      out(`${name.padEnd(22)} SKIP  (no sample ids available from /contracts)`);
       continue;
     }
 
-    for (const id of idCandidates) {
+    const scanned: Array<Record<string, unknown>> = [];
+    let aborted = false;
+
+    for (const id of probeIds) {
       const probePath = id === undefined ? path : path.replace(/:\w+/, encodeURIComponent(id));
-      const label = id === undefined ? name : `${name}[${id}]`;
       try {
         const body = await authorizedGet<unknown>(probePath, params);
         if (body === undefined) {
-          out(`${label.padEnd(22)} 404   ${probePath}  <-- path is wrong, fix routes.ts`);
-          continue;
+          out(`${name.padEnd(22)} 404   ${probePath}  <-- path is wrong, fix routes.ts`);
+          aborted = true;
+          break;
         }
         let rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
         if (rows.length === 0) {
           // extractRows yields ARRAYS only. A detail endpoint returns a single object at
           // the same declared path - /contracts/:id puts it at data.contract - so zero
-          // rows there means "not an array", not "not found", and reporting EMPTY reads
-          // as a broken route when the route is fine. Probe-only: production pagination
-          // is untouched, because there a non-array genuinely is the wrong shape.
+          // rows there means "not an array", not "not found". Probe-only: production
+          // pagination is untouched, because there a non-array IS the wrong shape.
           const at = dig(body, route.rowsPath);
           if (at !== null && typeof at === 'object' && !Array.isArray(at)) {
             rows = [at as Record<string, unknown>];
           }
         }
         if (rows.length === 0) {
-          // Say what the body DOES contain, so an empty result can be read as a wrong
-          // rowsPath rather than filed as "no data" and forgotten.
           const top = body === null || typeof body !== 'object' ? String(body) : Object.keys(body).join(', ');
           const data = (body as Record<string, unknown>)['data'];
           const inner =
@@ -573,50 +575,54 @@ async function cmdRoutesVerifyFields(): Promise<void> {
               : Array.isArray(data)
                 ? `array(${data.length})`
                 : Object.keys(data).slice(0, 20).join(', ');
-          out(`${label.padEnd(22)} EMPTY at rowsPath='${route.rowsPath}' - body keys: ${top} | data: ${inner}`);
-          continue;
+          out(`${name.padEnd(22)} EMPTY at rowsPath='${route.rowsPath}' - body keys: ${top} | data: ${inner}`);
+          aborted = true;
+          break;
         }
-
-        const scanned = rows.slice(0, SCAN);
-        const union = new Set<string>();
-        for (const r of scanned) for (const k of Object.keys(r)) union.add(k);
-
-        const absent: string[] = [];
-        const sparse: Array<[string, number]> = [];
-        let always = 0;
-        for (const [logical, alts] of Object.entries(map)) {
-          const hits = scanned.filter((r) => alts.some((a) => a in r)).length;
-          if (hits === scanned.length) always += 1;
-          else if (hits === 0) absent.push(logical);
-          else sparse.push([logical, hits]);
-        }
-
-        const total = Object.keys(map).length;
-        out(
-          `${label.padEnd(22)} ${scanned.length} rows | ${always}/${total} always present` +
-            `${absent.length > 0 ? ` | ${absent.length} ABSENT` : ''}` +
-            `${sparse.length > 0 ? ` | ${sparse.length} sparse` : ''}`,
-        );
-        // ABSENT means no alternate appeared on ANY scanned row - a real mapping
-        // defect. SPARSE means the field exists but is omitted when null, which is a
-        // data fact about the rows, not a bug in the map. Conflating the two is how a
-        // working field map gets "fixed" into a broken one.
-        for (const f of absent) out(`${' '.repeat(22)}   ABSENT ${f} -> tried: ${(map[f] ?? []).join(', ')}`);
-        for (const [f, n] of sparse) out(`${' '.repeat(22)}   sparse ${f} present on ${n}/${scanned.length} rows`);
-        if (absent.length > 0) {
-          out(`${' '.repeat(22)}   keys actually present (${union.size}): ${[...union].sort().join(', ')}`);
-        }
-
-        if (name === 'contracts') {
-          const first = scanned[0];
-          if (first !== undefined) {
-            if (first['id'] !== undefined) sampleNumericId = String(first['id']);
-            if (first['contract_id'] !== undefined) sampleContractId = String(first['contract_id']);
-          }
-        }
-        if (rows.length > 0 && path.includes(':')) break; // one working id is enough
+        for (const r of rows.slice(0, SCAN)) scanned.push(r);
+        if (!isDetail) break;
       } catch (err) {
-        out(`${label.padEnd(22)} FAIL  ${(err as Error).message}`);
+        out(`${name.padEnd(22)} FAIL  ${(err as Error).message}`);
+        aborted = true;
+        break;
+      }
+    }
+    if (aborted || scanned.length === 0) continue;
+
+    const union = new Set<string>();
+    for (const r of scanned) for (const k of Object.keys(r)) union.add(k);
+
+    const absent: string[] = [];
+    const sparse: Array<[string, number]> = [];
+    let always = 0;
+    for (const [logical, alts] of Object.entries(map)) {
+      const hits = scanned.filter((r) => alts.some((a) => a in r)).length;
+      if (hits === scanned.length) always += 1;
+      else if (hits === 0) absent.push(logical);
+      else sparse.push([logical, hits]);
+    }
+
+    const total = Object.keys(map).length;
+    out(
+      `${name.padEnd(22)} ${scanned.length} rows${isDetail ? ` (${probeIds.length} ids)` : ''}` +
+        ` | ${always}/${total} always present` +
+        `${absent.length > 0 ? ` | ${absent.length} ABSENT` : ''}` +
+        `${sparse.length > 0 ? ` | ${sparse.length} sparse` : ''}`,
+    );
+    // ABSENT means no alternate appeared on ANY scanned row - a real mapping defect.
+    // SPARSE means the field exists and is omitted when null, which is a fact about the
+    // data rather than a bug in the map. Conflating the two is how a working field map
+    // gets "fixed" into a broken one.
+    for (const f of absent) out(`${' '.repeat(22)}   ABSENT ${f} -> tried: ${(map[f] ?? []).join(', ')}`);
+    for (const [f, n] of sparse) out(`${' '.repeat(22)}   sparse ${f} present on ${n}/${scanned.length} rows`);
+    if (absent.length > 0) {
+      out(`${' '.repeat(22)}   keys actually present (${union.size}): ${[...union].sort().join(', ')}`);
+    }
+
+    if (name === 'contracts') {
+      for (const r of scanned) {
+        const id = r['id'] ?? r['contract_id'];
+        if (id !== undefined && sampleIds.length < DETAIL_SAMPLE) sampleIds.push(String(id));
       }
     }
   }

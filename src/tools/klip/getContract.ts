@@ -192,8 +192,6 @@ export const getContract: ToolDefinition<typeof inputShape> = {
       const dispatched = pickNumber(row, fields.trucking.dispatched);
       const received = pickNumber(row, fields.trucking.received);
       return {
-        sequence: pickString(row, fields.trucking.sequence),
-        truck_number: pickString(row, fields.trucking.truckNumber),
         sent_date: toDateOnly(pickString(row, fields.trucking.sentDate)),
         delivered_date: toDateOnly(pickString(row, fields.trucking.deliveredDate)),
         dispatched_mt: kgToMt(dispatched),
