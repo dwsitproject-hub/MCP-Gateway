@@ -63,6 +63,53 @@ const inputShape = {
     .describe('Exact KLIP contract id or PO number. No fuzzy matching is performed.'),
 };
 
+/**
+ * The derived quantities, fetched from the endpoint that actually computes them.
+ *
+ * Measured across ten different contracts on 14 Sep 2026: /contracts/:id returns 37
+ * fields and NONE of them is quantity_delivery, quantity_receive or
+ * outstanding_quantity. That is not a mapping error - the KLIP team told us on
+ * 28 Aug that the detail endpoint is `SELECT * FROM contracts WHERE id = $1` and
+ * derives nothing, so the columns genuinely do not exist on the row.
+ *
+ * Null was the honest answer while nothing better was available. It is no longer the
+ * best one: the LIST computes these fields, the header note above already records it
+ * as authoritative for them, and the Contracts page shows them - so a lookup that
+ * answers "shipped: unknown" disagrees with KLIP's own UI about a number KLIP holds.
+ * One extra filtered call closes that gap without deriving anything here.
+ *
+ * Best-effort like the other linked fetches: a failure names itself and the header
+ * still returns, because a missing quantity must never take down the whole contract.
+ */
+async function derivedQuantities(
+  contractId: string,
+  calls: CallRecord[],
+  failures: string[],
+): Promise<Row | undefined> {
+  const search = (routes.contracts.params as { search?: string }).search;
+  if (search === undefined) return undefined;
+  try {
+    const walked = await walk<Row>({
+      route: routes.contracts,
+      filters: { [search]: contractId },
+      maxPages: 1,
+      calls,
+    });
+    // `search` is a contains-match upstream, so it can return neighbours. Take the row
+    // whose id actually equals the one we resolved, never merely the first one back.
+    return walked.rows.find(
+      (r) => String(r['contract_id'] ?? '') === contractId || String(r['id'] ?? '') === contractId,
+    );
+  } catch (err) {
+    logger.warn({ contractId, err: (err as Error).message }, 'derived-quantity lookup failed');
+    failures.push(
+      `derived quantities: not retrieved (${(err as Error).message}). Shipped, received and outstanding ` +
+        'are reported as unknown below - that is a fetch failure, NOT a zero.',
+    );
+    return undefined;
+  }
+}
+
 /** Fetch a linked list without letting one failure take down the whole answer. */
 async function linked(
   label: string,
@@ -140,13 +187,12 @@ export const getContract: ToolDefinition<typeof inputShape> = {
     const matchedBy = dig(envelope, 'data.matched_by');
     const ambiguous = typeof matchCount === 'number' && matchCount > 1;
 
-    const line = outstandingFor(toContractLine(header));
-
     // Shipments and payments arrive INLINE. Only trucking needs its own call.
     const inlineShipments = dig(envelope, 'data.shipments');
     const inlinePayments = dig(envelope, 'data.payments');
 
-    const [linkedShipments, truckingRows, linkedPayments] = await Promise.all([
+    const resolvedId = String(header['contract_id'] ?? id);
+    const [linkedShipments, truckingRows, linkedPayments, listRow] = await Promise.all([
       Array.isArray(inlineShipments)
         ? Promise.resolve(inlineShipments as Row[])
         : linked('shipments', id, routes.shipments, calls, failures),
@@ -154,7 +200,24 @@ export const getContract: ToolDefinition<typeof inputShape> = {
       Array.isArray(inlinePayments)
         ? Promise.resolve(inlinePayments as Row[])
         : linked('payments', id, routes.payments, calls, failures),
+      derivedQuantities(resolvedId, calls, failures),
     ]);
+
+    /**
+     * Merge, but only where the detail row is SILENT. Overwriting a field the detail
+     * does carry would quietly swap one endpoint's answer for another's, and the two
+     * disagree on purpose - the detail says what is stored, the list what is
+     * reportable. Only the three genuinely absent keys are taken.
+     */
+    const merged: Row = { ...header };
+    let quantitiesFromList = false;
+    for (const key of ['quantity_delivery', 'quantity_receive', 'outstanding_quantity']) {
+      if (!(key in merged) && listRow !== undefined && key in listRow) {
+        merged[key] = listRow[key];
+        quantitiesFromList = true;
+      }
+    }
+    const line = outstandingFor(toContractLine(merged));
     const shipmentRows = linkedShipments;
     const paymentRows = linkedPayments;
 
@@ -227,17 +290,28 @@ export const getContract: ToolDefinition<typeof inputShape> = {
         status: line.status,
         contract_date: toDateOnly(pickString(header, fields.contract.contractDate)),
         qty_po_mt: kgToMt(line.qty_po_kg),
-        shipped_mt: kgToMt(pickNumber(header, fields.contract.shipped)),
-        received_mt: kgToMt(pickNumber(header, fields.contract.received)),
+        shipped_mt: kgToMt(pickNumber(merged, fields.contract.shipped)),
+        received_mt: kgToMt(pickNumber(merged, fields.contract.received)),
         outstanding_mt: kgToMt(line.outstanding_kg),
         outstanding_basis: line.basis,
-        remarks: pickString(header, fields.contract.remarks),
         data_quality: line.data_quality,
       },
       shipments,
       trucking,
       payments,
-      quantities_note: 'Payment amounts are currency values and are NOT converted; only quantities are in MT.',
+      quantities_note: quantitiesFromList
+        ? 'Payment amounts are currency values and are NOT converted; only quantities are in MT. ' +
+          'shipped_mt, received_mt and outstanding_mt come from KLIP\'s CONTRACTS LIST, which computes them - ' +
+          'the detail record does not store those columns at all. This is the same figure the KLIP Contracts ' +
+          'page shows, not a second calculation.'
+        : 'Payment amounts are currency values and are NOT converted; only quantities are in MT. ' +
+          'shipped_mt, received_mt and outstanding_mt are UNKNOWN here: the detail record does not store them ' +
+          'and the contracts list did not return this contract. Unknown is not zero - check the KLIP ' +
+          'Contracts page before reporting a quantity.',
+      remarks_note:
+        'KLIP exposes no remark TEXT through its API. The contracts list carries a remarks_count only, and the ' +
+        'detail record carries neither (measured across ten contracts, 14 Sep 2026), so remarks are not ' +
+        'reported rather than reported as empty.',
     };
 
     if (ambiguous) {

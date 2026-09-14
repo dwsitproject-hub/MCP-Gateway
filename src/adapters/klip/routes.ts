@@ -8,9 +8,14 @@
  * P1 route-reconciliation output lands in ONE place instead of being scattered
  * through eight tool handlers.
  *
- *   !!  EVERY entry below is currently UNVERIFIED (verified: false).  !!
- *   !!  Stage 4 is gated on Checkpoint 0.4: run `npm run cli -- routes:verify`  !!
- *   !!  against KLIP staging, then set verified/verifiedBy/verifiedOn per row.  !!
+ *   Every entry is now VERIFIED against KLIP PRODUCTION on 2026-09-14, by
+ *   `routes:verify-fields` - which checks each MAPPED FIELD against 50 live rows
+ *   (10 different ids for the detail route), not merely that the path resolves.
+ *   The weaker `routes:verify` is kept for a quick 404 sweep.
+ *
+ *   That distinction was not academic: the payments map matched NOTHING for due
+ *   date, paid date and amount, so every payment reported as unpaid and none as
+ *   overdue, and the route had been flagged verified since August.
  *
  * `assertVerified()` is called at boot when KLIP_ENV=production, so an
  * unreconciled contract cannot reach production by accident.
@@ -171,8 +176,14 @@ export const routes = {
     quantityUnit: 'mt',
     dateFormat: 'unknown' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const, verifiedBy: 'routes:verify-fields against production', verifiedOn: '2026-09-14',
     notes:
+      'PRODUCTION, 10 different contract ids: 37 fields, and the record sits at data.contract as ' +
+      'declared. shipped, received and outstanding are ABSENT from all ten - not a mapping error but ' +
+      'the endpoint\'s nature, since upstream it is SELECT * FROM contracts WHERE id = $1 and derives ' +
+      'nothing. klip_get_contract now reads those three from the LIST, which computes them, rather ' +
+      'than reporting a null the KLIP Contracts page contradicts. No remark TEXT exists on either ' +
+      'endpoint; the list carries remarks_count only. ' +
       'Accepts a contract UUID, a contract number or a PO number (KLIP 35d740f). Returns matched_by ' +
       '("uuid" or "contract_or_po_number") and match_count - a PO can span several contracts under ' +
       'multi-STO, and KLIP resolves one deterministically, so match_count > 1 means the answer is one ' +
@@ -500,8 +511,13 @@ export const routes = {
     quantityUnit: 'none',
     dateFormat: 'iso-date' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const, verifiedBy: 'routes:verify-fields against production', verifiedOn: '2026-09-14',
     notes:
+      'PRODUCTION: the six documented keys are exactly what comes back, and scope=filtered returns the ' +
+      'same shape as an unscoped call - the gate changes the FIGURES, not the envelope. Confirmed a ' +
+      'strict subset of late-performance/data, which adds tree, onTrackTree and unscheduledTree. ' +
+      'Note rowsPath=data addresses an OBJECT: extractRows yields arrays only, so a probe reporting ' +
+      '"rows=0" here says nothing about the contract either way. ' +
       'Returns data.{scope, ytd_range, summary, onTrackSummary, statusCardSummary, distribution} - a ' +
       'summary object, not rows. Aggregated over the whole filtered set with no pagination. ' +
       'Figures follow the KLIP outstanding rules, which govern per the 24 Aug ruling; our own ' +
@@ -597,8 +613,10 @@ export const routes = {
     quantityUnit: 'kg',
     dateFormat: 'unknown' as const,
     authMiddleware: 'bearerAuth',
-    verified: false,
+    verified: true as const, verifiedBy: 'routes:verify-fields against production', verifiedOn: '2026-09-14',
     notes:
+      'PRODUCTION, 50 rows: all 59 mapped fields present on every row, 80 keys per row, 376 rows total ' +
+      'in one unpaginated response. ' +
       'GET /api/shipments/performance. Backs the Shipping Performance page. No pagination and no total, ' +
       'so completeness cannot be asserted. Delta fields are KLIP-computed; do not recompute from the ' +
       'ETA/ATA pairs. Milestone coverage ranges from 90 to 171 of 370 rows.',
@@ -619,8 +637,11 @@ export const routes = {
     quantityUnit: 'none',
     dateFormat: 'unknown' as const,
     authMiddleware: 'authenticateToken (no role gate)',
-    verified: false,
+    verified: true as const, verifiedBy: 'routes:verify-fields against production', verifiedOn: '2026-09-14',
     notes:
+      'PRODUCTION, 50 rows: all 26 mapped fields present on every row, 30 keys per row. The whole ' +
+      'dataset - 4,092 rows on 14 Sep 2026 - arrives in ONE unpaginated response, an order of ' +
+      'magnitude past staging, so the cache is what keeps this inside the latency target. ' +
       'GET /api/oil-loss, mounted at server.ts:212 with a root GET handler. Bearer token required, ' +
       'no role gate beyond authentication. Carries the contract join directly: contract_number, ' +
       'contract_ext_no, sto_number, po_number, operation_id. ' +
@@ -751,9 +772,30 @@ export const enums = {
     'unplanned', 'planned', 'inprogress', 'loading',
     'intransit', 'unloading', 'completed', 'cancelled',
   ],
-  /** Still false: transport_mode/currency/contract_type are recorded but unused, and
-   *  the quality endpoint has not been found, so its vocabulary is unknown. */
-  verified: false,
+  /**
+   * VERIFIED against KLIP PRODUCTION on 2026-09-14, sampled over 200 contract rows.
+   * A sample proves what EXISTS, never the full domain, so unlisted values are still
+   * excluded with a note rather than defaulted.
+   *
+   *   status         Open, Close            unchanged
+   *   incoterm       CIF, FOB, FRC, LCO     CIF is NEW to production and is already
+   *                                         classified in receivedBasisIncoterms, so
+   *                                         nothing falls through to the ELSE rule
+   *   transport_mode LAND, MIX, SEA         unchanged
+   *   currency       IDR, US$               staging said USD; recorded but unused
+   *   unit           KG                     staging said MT. Nothing matches on this
+   *                                         string - quantities are converted in code
+   *                                         and the envelope declares MT itself - so
+   *                                         the value is inert. It also states the
+   *                                         kilogram fact outright, which the
+   *                                         MT-labelled staging rows only implied.
+   *   contract_type  B2B, DIRECT            unchanged
+   *
+   * Shipments and trucking summary buckets confirmed present as data.summary.status.
+   * The old blocker - "the quality endpoint has not been found" - is stale: quality
+   * ships, and all 22 of its mapped fields are present on every one of 50 rows.
+   */
+  verified: true,
 } as const;
 
 export interface VerificationGap {

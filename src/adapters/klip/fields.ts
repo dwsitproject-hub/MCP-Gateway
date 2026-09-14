@@ -97,7 +97,12 @@ export const fields = {
     /** Per-row unit of measure. Observed "MT" on contracts. */
     unit: ['unit', 'uom', 'unitOfMeasure'],
     contractDate: ['contractDate', 'contract_date', 'tanggalKontrak', 'date'],
-    remarks: ['remarks', 'remark', 'notes', 'keterangan'],
+    /**
+     * REMOVED 14 Sep 2026. Absent from all 50 list rows and all 10 detail records in
+     * production; KLIP carries a remarks_count on the list and no text anywhere. The
+     * mapping only ever produced a null that read as "this contract has no remarks".
+     *   remarks: ['remarks', 'remark', 'notes', 'keterangan'],
+     */
   },
 
   /**
