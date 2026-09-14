@@ -21,6 +21,7 @@
  *   audit:export --from --to       CSV/JSONL export for IT Security (S4 / U5)
  *   audit:summary [--days N]       per-tool usage, error and truncation rates
  *   routes:verify                  probe KLIP and report the Appendix A gaps
+ *   routes:verify-fields           check every MAPPED field against a live row
  */
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
@@ -34,6 +35,7 @@ import * as hub from './auth/hub.js';
 import { revokeAll, revokeUser } from './auth/tokens.js';
 import * as audit from './core/audit.js';
 import { routes, verificationGaps, type RouteContract } from './adapters/klip/routes.js';
+import { fields } from './adapters/klip/fields.js';
 import { authorizedGet } from './adapters/klip/session.js';
 import { extractRows, TOTAL_PAGES_ALTERNATES } from './adapters/klip/paginate.js';
 
@@ -470,6 +472,164 @@ async function cmdRoutesVerify(): Promise<void> {
   }
 }
 
+/** Route -> the fields.ts map the tools read for it. Order matters: `contracts`
+ *  runs before `contractById` so the list endpoint can lend it a real id. */
+const FIELD_MAPS: Array<[string, keyof typeof fields]> = [
+  ['contracts', 'contract'],
+  ['contractById', 'contract'],
+  ['shipments', 'shipment'],
+  ['trucking', 'trucking'],
+  ['quality', 'quality'],
+  ['payments', 'payment'],
+  ['oilLoss', 'oilLoss'],
+  ['shippingPerformance', 'shippingPerformance'],
+  ['sapImports', 'sapImport'],
+];
+
+/**
+ * Deep verification: does every field the tools actually READ exist in this
+ * environment's payload?
+ *
+ * `routes:verify` proves a path resolves and prints twelve key names. That catches a
+ * 404 and almost nothing else - shippingPerformance maps forty fields, so it can be
+ * wrong in thirty-nine of them and still report OK. Appendix A asks whether the route
+ * CONTRACT holds, and a contract is the field map, not the status code.
+ *
+ * Three things routes:verify cannot do, all of them needed before a flag is flipped:
+ *   - contractById has a :id segment, so it needs an id borrowed from the list
+ *   - the late-performance endpoints return a summary OBJECT, so extractRows finds
+ *     nothing and reports "rows=0" whether the contract holds or not
+ *   - the enum sets are values, not shapes, and have to be sampled
+ */
+async function cmdRoutesVerifyFields(): Promise<void> {
+  out(`Deep-probing ${cfg.KLIP_BASE_URL} (KLIP_ENV=${cfg.KLIP_ENV})\n`);
+  const all = routes as Record<string, RouteContract>;
+  let sampleContractId: string | undefined;
+
+  for (const [name, mapKey] of FIELD_MAPS) {
+    const route = all[name];
+    if (route === undefined) continue;
+    const map = fields[mapKey] as unknown as Record<string, string[]>;
+
+    let path = route.path;
+    const params: Record<string, string | number> = {};
+    if (route.params.limit !== undefined) params[route.params.limit] = 1;
+    if (route.params.page !== undefined) params[route.params.page] = 1;
+
+    if (path.includes(':')) {
+      if (sampleContractId === undefined) {
+        out(`${name.padEnd(22)} SKIP  (no sample id available from /contracts)`);
+        continue;
+      }
+      path = path.replace(/:\w+/, encodeURIComponent(sampleContractId));
+    }
+
+    try {
+      const body = await authorizedGet<unknown>(path, params);
+      if (body === undefined) {
+        out(`${name.padEnd(22)} 404   ${path}  <-- path is wrong, fix routes.ts`);
+        continue;
+      }
+      const rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
+      const row = rows[0];
+      if (row === undefined) {
+        // An empty result proves the path resolves and NOTHING about the contract.
+        // Saying so beats printing a reassuring zero.
+        out(`${name.padEnd(22)} EMPTY - no row returned, so the field map is UNPROVEN here`);
+        continue;
+      }
+
+      const missing: string[] = [];
+      let present = 0;
+      for (const [logical, alts] of Object.entries(map)) {
+        if (alts.some((a) => a in row)) present += 1;
+        else missing.push(logical);
+      }
+      const total = present + missing.length;
+      const verdict = missing.length === 0 ? 'ALL PRESENT' : `${missing.length} MISSING`;
+      out(`${name.padEnd(22)} ${verdict}  (${present}/${total} mapped, row carries ${Object.keys(row).length} keys)`);
+      for (const f of missing) out(`${' '.repeat(22)}   MISSING ${f} -> tried: ${(map[f] ?? []).join(', ')}`);
+
+      if (name === 'contracts') {
+        const id = row['contract_id'] ?? row['id'];
+        if (id !== undefined) sampleContractId = String(id);
+      }
+    } catch (err) {
+      out(`${name.padEnd(22)} FAIL  ${(err as Error).message}`);
+    }
+  }
+
+  // The late-performance pair returns a summary object rather than rows, so report
+  // its SHAPE. Probed with and without the scope gate, because an unscoped call
+  // returning nothing is a filter behaviour, not a broken route.
+  out('');
+  for (const name of ['latePerformanceData', 'latePerformanceSummary']) {
+    const route = all[name];
+    if (route === undefined) continue;
+    for (const scope of [undefined, 'filtered']) {
+      const params: Record<string, string | number> = {};
+      if (scope !== undefined && route.params.scope !== undefined) params[route.params.scope] = scope;
+      try {
+        const body = await authorizedGet<Record<string, unknown>>(route.path, params);
+        const at = body === undefined ? undefined : body['data'];
+        const shape =
+          at === undefined || at === null
+            ? String(at)
+            : Array.isArray(at)
+              ? `array(${at.length})`
+              : Object.keys(at as object).slice(0, 16).join(', ');
+        out(`${name.padEnd(22)} scope=${scope ?? '(none)'} -> data: ${shape}`);
+      } catch (err) {
+        out(`${name.padEnd(22)} scope=${scope ?? '(none)'} FAIL ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // Enum sets. A sample proves what EXISTS, never the full domain - so the row count
+  // is printed beside the values and belongs in the note that records them.
+  out('');
+  try {
+    const route = all['contracts'];
+    if (route !== undefined) {
+      const params: Record<string, string | number> = {};
+      if (route.params.limit !== undefined) params[route.params.limit] = 200;
+      if (route.params.page !== undefined) params[route.params.page] = 1;
+      const body = await authorizedGet<unknown>(route.path, params);
+      const rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
+      out(`enum sample over ${rows.length} contract rows:`);
+      for (const key of ['status', 'incoterm', 'transport_mode', 'currency', 'unit', 'contract_type']) {
+        const seen = [
+          ...new Set(rows.map((r) => r[key]).filter((v): v is string => typeof v === 'string' && v !== '')),
+        ].sort();
+        out(`  ${key.padEnd(16)} ${seen.length > 0 ? seen.join(', ') : '(none seen)'}`);
+      }
+    }
+  } catch (err) {
+    out(`enum sample FAIL ${(err as Error).message}`);
+  }
+
+  // Shipments and trucking carry their own status vocabularies in data.summary, which
+  // is where the tools read the bucket counts from.
+  for (const name of ['shipments', 'trucking']) {
+    const route = all[name];
+    if (route === undefined) continue;
+    try {
+      const params: Record<string, string | number> = {};
+      if (route.params.limit !== undefined) params[route.params.limit] = 1;
+      const body = await authorizedGet<Record<string, unknown>>(route.path, params);
+      const data = body?.['data'] as Record<string, unknown> | undefined;
+      const summary = data?.['summary'];
+      const keys =
+        summary === undefined || summary === null || typeof summary !== 'object'
+          ? '(no data.summary)'
+          : Object.keys(summary).join(', ');
+      out(`  ${name.padEnd(16)} data.summary: ${keys}`);
+    } catch (err) {
+      out(`  ${name.padEnd(16)} FAIL ${(err as Error).message}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // dispatch
 // ---------------------------------------------------------------------------
@@ -486,6 +646,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   'audit:export': cmdAuditExport,
   'audit:summary': cmdAuditSummary,
   'routes:verify': async () => cmdRoutesVerify(),
+  'routes:verify-fields': async () => cmdRoutesVerifyFields(),
   'hub:check': async () => cmdHubCheck(),
   migrate: async () => {
     const applied = await runMigrations();
