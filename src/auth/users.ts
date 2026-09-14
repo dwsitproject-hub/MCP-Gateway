@@ -117,13 +117,17 @@ export async function addHubUser(email: string, displayName?: string): Promise<U
 
 /** Create or replace the single break-glass local account. */
 export async function addBreakGlassUser(email: string, password: string, displayName?: string): Promise<User> {
+  // ACTIVE is the invariant, not merely present. The first version of this check
+  // omitted `disabled_at IS NULL` while its error said "disable it first", so the one
+  // remedy it named did nothing and the operator was stuck with no way forward.
   const existing = await query<{ email: string }>(
-    "SELECT email FROM users WHERE is_break_glass = TRUE AND lower(email) <> lower($1)",
+    "SELECT email FROM users WHERE is_break_glass = TRUE AND disabled_at IS NULL AND lower(email) <> lower($1)",
     [email.trim()],
   );
   if (existing.length > 0) {
     throw new Error(
-      `a break-glass account already exists (${existing[0]?.email}). Exactly one is expected; disable it first.`,
+      `an ACTIVE break-glass account already exists (${existing[0]?.email}). Exactly one is expected. ` +
+        `Run: user:disable ${existing[0]?.email}`,
     );
   }
 
@@ -166,6 +170,25 @@ export async function disable(email: string): Promise<void> {
 }
 
 export async function enable(email: string): Promise<void> {
+  /**
+   * Re-enabling is where the "exactly one break-glass" invariant is easiest to break:
+   * disable the old emergency account, provision a new one, then re-enable the old for
+   * an unrelated reason and there are silently two passwords that bypass Downstream Hub.
+   * Refused here rather than discovered in an audit.
+   */
+  const target = await findByEmail(email);
+  if (target?.is_break_glass === true) {
+    const other = await query<{ email: string }>(
+      "SELECT email FROM users WHERE is_break_glass = TRUE AND disabled_at IS NULL AND lower(email) <> lower($1)",
+      [email.trim()],
+    );
+    if (other.length > 0) {
+      throw new Error(
+        `cannot re-enable ${email.trim()}: it is a break-glass account and ${other[0]?.email} is already the ` +
+          'active one. Exactly one may bypass Downstream Hub at a time.',
+      );
+    }
+  }
   await query(
     'UPDATE users SET disabled_at = NULL, failed_logins = 0, locked_until = NULL WHERE lower(email) = lower($1)',
     [email.trim()],
