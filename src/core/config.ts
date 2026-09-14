@@ -162,6 +162,25 @@ const Env = z.object({
    */
   HUB_TOKEN_BODY: z.enum(['json', 'form']).default('json'),
   /** How long a Hub round trip may take before its state row expires. */
+  /**
+   * Require the Hub to echo our `nonce` back in the ID token.
+   *
+   * OIDC Core 3.1.3.7 step 11 says that if a nonce was SENT, one MUST come back - so
+   * the default is true and a provider that drops it is non-conformant. Some homegrown
+   * SSO implementations accept the parameter and never store it.
+   *
+   * Setting this false accepts an ABSENT nonce and nothing else: a nonce that comes
+   * back with the WRONG value stays fatal either way, because that is not a missing
+   * feature but a signal that the token belongs to a different sign-in. The residual
+   * protection is real - this is the authorization CODE flow, so the token arrives over
+   * the back channel from the token endpoint rather than through the browser, PKCE S256
+   * binds the code to this client, and `state` is single-use and checked separately.
+   */
+  HUB_REQUIRE_NONCE: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0'),
+
   HUB_STATE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   /**
    * Acknowledge a plaintext http:// Downstream Hub.

@@ -14,7 +14,8 @@
  */
 import { startMockHub, type MockHub } from './fixtures/mockHub.js';
 
-const PORT = 5194;
+import { PORTS } from './fixtures/ports.js';
+const PORT = PORTS.hubDws;
 const HUB = `http://127.0.0.1:${PORT}`;
 
 process.env.HUB_ISSUER = HUB;

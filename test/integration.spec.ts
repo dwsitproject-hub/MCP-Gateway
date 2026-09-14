@@ -13,7 +13,8 @@ import type { Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { freshState, startMockKlip, type MockState } from './fixtures/mockKlip.js';
 
-const PORT = 5188;
+import { PORTS } from './fixtures/ports.js';
+const PORT = PORTS.integration;
 
 let server: Server;
 let state: MockState;

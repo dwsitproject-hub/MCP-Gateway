@@ -13,7 +13,8 @@
  */
 import { startMockHub, type MockHub } from './fixtures/mockHub.js';
 
-const PORT = 5193;
+import { PORTS } from './fixtures/ports.js';
+const PORT = PORTS.hubTokenAuth;
 process.env.HUB_ISSUER = `http://127.0.0.1:${PORT}`;
 process.env.HUB_CLIENT_ID = 'mcp-gw';
 process.env.HUB_CLIENT_SECRET = 'test-dwshub-secret';

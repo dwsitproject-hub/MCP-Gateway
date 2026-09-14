@@ -9,7 +9,8 @@
  */
 import { startMockHub, type MockHub } from './fixtures/mockHub.js';
 
-const PORT = 5191;
+import { PORTS } from './fixtures/ports.js';
+const PORT = PORTS.hubGroupGate;
 process.env.HUB_ISSUER = `http://127.0.0.1:${PORT}`;
 process.env.HUB_CLIENT_ID = 'mcp-gateway-test-client';
 process.env.HUB_CLIENT_SECRET = 'mcp-gateway-test-secret';

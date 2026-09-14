@@ -10,7 +10,8 @@ import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { freshState, startMockKlip, type MockState } from './fixtures/mockKlip.js';
 
-const PORT = 5189;
+import { PORTS } from './fixtures/ports.js';
+const PORT = PORTS.truncation;
 
 // Set BEFORE any src import: one page of a three-page result.
 process.env.KLIP_BASE_URL = `http://127.0.0.1:${PORT}/api`;

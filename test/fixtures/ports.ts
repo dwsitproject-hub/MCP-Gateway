@@ -24,4 +24,11 @@ export const PORTS = {
   performanceSummary: 5199,
   shippingPerformance: 5200,
   jettyAtBerth: 5201,
+  // Added 14 Sep 2026. Six specs were still hardcoding a port and bypassing this file
+  // entirely - hub.spec.ts sat on 5190 (audit) and hubDws.spec.ts on 5194 (hubPairing).
+  // Both are real duplicates, latent only because vitest happened not to run those
+  // files at the same moment. That is the exact failure this registry was created for.
+  hub: 5202,
+  hubDws: 5203,
+  hubNonce: 5204,
 } as const;

@@ -428,9 +428,39 @@ export async function exchangeCode(code: string, codeVerifier: string, expectedN
     throw new HubError(`the Hub's identity token failed validation (${(err as Error).message})`, 'id_token_invalid');
   }
 
+  /**
+   * ABSENT and WRONG are different failures and were reported identically, which sent
+   * the first production sign-in attempt looking for an attack that was not there.
+   *
+   * A wrong nonce means this ID token belongs to some other sign-in: always fatal.
+   * An absent one means the provider ignored the parameter - non-conformant, but a
+   * missing defence rather than a broken one, and recoverable by configuration.
+   */
   const nonce = claimAsString(payload, 'nonce');
-  if (nonce === undefined || nonce !== expectedNonce) {
-    throw new HubError('the Hub identity token nonce did not match this sign-in attempt', 'id_token_invalid');
+  if (nonce !== undefined && nonce !== expectedNonce) {
+    logger.error({ issuer }, 'Hub ID token carried a nonce belonging to a different sign-in');
+    throw new HubError(
+      'the Hub identity token carries a nonce from a DIFFERENT sign-in attempt. This is not a ' +
+        'configuration problem and must not be worked around.',
+      'id_token_invalid',
+    );
+  }
+  if (nonce === undefined) {
+    if (cfg.HUB_REQUIRE_NONCE) {
+      throw new HubError(
+        'the Hub returned no nonce in its identity token, though one was sent with the sign-in request ' +
+          '(OIDC Core 3.1.3.7). If this Hub genuinely does not implement nonce, set HUB_REQUIRE_NONCE=false ' +
+          'to accept its absence - a nonce that comes back WRONG stays refused either way.',
+        'id_token_invalid',
+      );
+    }
+    // Logged on every sign-in, not once at boot: a silently reduced check is one that
+    // nobody remembers is reduced.
+    logger.warn(
+      { issuer },
+      'Hub ID token carried no nonce and HUB_REQUIRE_NONCE=false; accepted on the strength of ' +
+        'the code flow, PKCE and single-use state',
+    );
   }
 
   const subject = claimAsString(payload, 'sub');
