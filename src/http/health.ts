@@ -17,12 +17,35 @@ import { cfg } from './../core/config.js';
 import * as cache from './../core/cache.js';
 import { clientIpOf } from './clientIp.js';
 
-const PRIVATE_PREFIXES = ['127.', '::1', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.2', '172.3', '192.168.'];
+/**
+ * RFC1918 / loopback, decided by PARSING rather than by string prefix.
+ *
+ * The first version listed prefixes, and '172.2' and '172.3' were meant as shorthand
+ * for 172.20-172.31. They also match 172.2.x.x, 172.32.x.x and 172.200.x.x, every one
+ * of them PUBLIC address space - so the detailed health payload, which names the
+ * environment, the upstream state and whether the break-glass password path is live,
+ * would render for callers this was written to exclude. 172.16.0.0/12 means the second
+ * octet is 16 to 31 and nothing else, which a prefix string cannot express.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  const addr = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  if (addr === '::1') return true;
+  const octets = addr.split('.');
+  if (octets.length !== 4) return false;
+  const parts = octets.map((o) => (/^\d{1,3}$/.test(o) ? Number(o) : -1));
+  if (parts.some((n) => n < 0 || n > 255)) return false;
+  const [a, b] = parts as [number, number, number, number];
+  if (a === 127) return true;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
 
 function isInternal(req: Request): boolean {
   const ip = clientIpOf(req);
   if (ip === undefined) return false;
-  return PRIVATE_PREFIXES.some((prefix) => ip.startsWith(prefix));
+  return isPrivateAddress(ip);
 }
 
 let lastHubProbe: { at: number; ok: boolean; detail: string } | undefined;
