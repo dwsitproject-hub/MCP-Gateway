@@ -11,6 +11,7 @@
  * Commands:
  *   user:add <email> [name]        add a pilot user who signs in via Downstream Hub
  *   user:add-break-glass <email>   provision the single local emergency account
+ *   user:clear-break-glass <email> demote it back to an ordinary Hub pilot user
  *   hub:check                      verify Hub OIDC discovery and print the redirect_uri
  *   user:disable <email>           disable and revoke every token they hold
  *   user:enable <email>            re-enable
@@ -179,6 +180,20 @@ async function cmdBreakGlassAdd(args: string[]): Promise<void> {
   out(`provisioned break-glass account ${user.email} (must change password at first use)`);
   out('This is the ONLY account that can sign in without Downstream Hub. Treat the password');
   out('as an emergency credential: store it in the vault, not in a password manager shared by the team.');
+}
+
+async function cmdClearBreakGlass(args: string[]): Promise<void> {
+  const email = args[0];
+  if (email === undefined) throw new Error('usage: user:clear-break-glass <email>');
+  await users.clearBreakGlass(email);
+  await audit.write({
+    event: 'admin_action',
+    ctx: { requestId: audit.newRequestId(), userId: 'cli' },
+    outcome: 'break_glass_cleared',
+    detail: { email: email.trim().toLowerCase(), severity: 'high' },
+  });
+  out(`${email.trim().toLowerCase()} is no longer a break-glass account: its local password is REMOVED`);
+  out('and it authenticates through Downstream Hub only. Run user:enable if it is currently disabled.');
 }
 
 async function cmdUserDisable(args: string[]): Promise<void> {
@@ -705,6 +720,7 @@ async function cmdRoutesVerifyFields(): Promise<void> {
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   'user:add': cmdUserAdd,
   'user:add-break-glass': cmdBreakGlassAdd,
+  'user:clear-break-glass': cmdClearBreakGlass,
   'user:disable': cmdUserDisable,
   'user:enable': cmdUserEnable,
   'user:password': cmdUserPassword,

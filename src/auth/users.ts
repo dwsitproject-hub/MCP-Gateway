@@ -151,6 +151,49 @@ export async function addBreakGlassUser(email: string, password: string, display
   return { id, email: normalised, displayName: displayName ?? null, mustChangePassword: true, authSource: 'local' };
 }
 
+/**
+ * Demote a break-glass account to an ordinary Downstream Hub pilot user.
+ *
+ * Needed because the flag was previously a one-way door. Provisioning break-glass
+ * against a person's own address - easy to do, since it is the address to hand -
+ * permanently marked that account local, and the "exactly one active" rule then
+ * refused to re-enable it once a proper emergency account existed. Two correct guards
+ * met and left the operator with no move except editing the users table by hand.
+ *
+ * The password hash is CLEARED, not kept. A demoted account that still holds a working
+ * local password is exactly the unwatched second way in that the one-account rule
+ * exists to prevent - the flag would say Hub-only while the password path stayed open.
+ */
+export async function clearBreakGlass(email: string): Promise<void> {
+  const target = await findByEmail(email);
+  if (target === undefined) throw new Error(`no such user: ${email.trim()}`);
+  if (!target.is_break_glass) throw new Error(`${target.email} is not a break-glass account; nothing to clear`);
+
+  // Demoting the last ACTIVE one would leave no way in at all if the Hub goes down,
+  // which is the situation break-glass exists for. Named remedies, both of which work.
+  if (target.disabled_at === null && cfg.BREAK_GLASS_ENABLED) {
+    const other = await query<{ email: string }>(
+      "SELECT email FROM users WHERE is_break_glass = TRUE AND disabled_at IS NULL AND lower(email) <> lower($1)",
+      [email.trim()],
+    );
+    if (other.length === 0) {
+      throw new Error(
+        `${target.email} is the only ACTIVE break-glass account and BREAK_GLASS_ENABLED is true. ` +
+          'Provision a replacement first (user:add-break-glass <other-email>), or set ' +
+          'BREAK_GLASS_ENABLED=false to drop the password path deliberately.',
+      );
+    }
+  }
+
+  await query(
+    `UPDATE users
+        SET is_break_glass = FALSE, auth_source = 'hub', password_hash = NULL, must_change_pw = FALSE
+      WHERE lower(email) = lower($1)`,
+    [email.trim()],
+  );
+  logger.warn({ email: target.email }, 'break-glass cleared; account is now Downstream Hub only');
+}
+
 export async function setPassword(email: string, password: string): Promise<void> {
   const row = await findByEmail(email);
   if (row === undefined) throw new Error(`no such user: ${email}`);

@@ -115,6 +115,43 @@ describe('provisioning the break-glass account', () => {
   });
 });
 
+describe('demoting a break-glass account', () => {
+  it('clears the flag AND removes the local password', async () => {
+    // Clearing the flag while leaving password_hash in place would give an account that
+    // reads Hub-only and still signs in with a password - the unwatched second way in.
+    responder = tableOf([
+      row('old@example.com', { breakGlass: true, disabled: true }),
+      row('new@example.com', { breakGlass: true }),
+    ]);
+    await users.clearBreakGlass('old@example.com');
+    const update = calls.find((c) => c.sql.includes('is_break_glass = FALSE'));
+    expect(update?.sql).toContain('password_hash = NULL');
+    expect(update?.sql).toContain("auth_source = 'hub'");
+  });
+
+  it('refuses to demote the last ACTIVE one, and names two remedies that work', async () => {
+    responder = tableOf([row('only@example.com', { breakGlass: true })]);
+    await expect(users.clearBreakGlass('only@example.com')).rejects.toThrow(
+      /only ACTIVE break-glass account[\s\S]*user:add-break-glass[\s\S]*BREAK_GLASS_ENABLED=false/,
+    );
+  });
+
+  it('refuses on an account that was never break-glass', async () => {
+    responder = tableOf([row('plain@example.com')]);
+    await expect(users.clearBreakGlass('plain@example.com')).rejects.toThrow(/not a break-glass account/);
+  });
+
+  it('lets the demoted account be re-enabled, which was the dead end', async () => {
+    // The whole point: provisioning break-glass on a person's own address used to be a
+    // one-way door - the enable guard then refused it forever.
+    responder = tableOf([
+      row('person@example.com', { disabled: true }),
+      row('breakglass@example.com', { breakGlass: true }),
+    ]);
+    await expect(users.enable('person@example.com')).resolves.toBeUndefined();
+  });
+});
+
 describe('re-enabling', () => {
   it('refuses to bring back a break-glass account while another is active', async () => {
     // The other half of the invariant: disable the old one, provision a new one, then
