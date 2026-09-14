@@ -253,11 +253,32 @@ export const fields = {
     contractId: ['contractId', 'contract_id'],
     invoiceNumber: ['invoiceNumber', 'invoice_number', 'noInvoice'],
     invoiceDate: ['invoiceDate', 'invoice_date', 'tanggalInvoice'],
-    dueDate: ['dueDate', 'due_date', 'tanggalJatuhTempo', 'jatuhTempo'],
-    paidDate: ['paidDate', 'paid_date', 'tanggalBayar', 'datePaid'],
+    /**
+     * Corrected 14 Sep 2026 against 50 live PRODUCTION rows. Every candidate below the
+     * first was absent from all fifty, which is why this map silently produced nulls:
+     * klip_payment_status derives is_paid from paidDate and is_overdue from dueDate, so
+     * EVERY payment read as unpaid, NONE as overdue, and amounts_by_currency was empty
+     * with every row counted in excluded_missing_amount. Plausible output, entirely wrong.
+     *
+     * AMBIGUITY, recorded rather than resolved by guess: the payments row carries BOTH
+     * `payment_due_date` and `due_date_payment`, and both `payment_date` and
+     * `payoff_date`. The payment-prefixed pair is taken as the payment's own dates and
+     * the others are left out, because payoff is a contract-level event and mislabelling
+     * it as the paid date would move the overdue flag. Confirm with KLIP before either
+     * alternate is added.
+     */
+    dueDate: ['payment_due_date', 'dueDate', 'due_date', 'tanggalJatuhTempo'],
+    paidDate: ['payment_date', 'paidDate', 'paid_date', 'tanggalBayar'],
     status: ['status', 'paymentStatus', 'payment_status'],
-    amount: ['amount', 'amountIdr', 'nilai', 'total'],
+    amount: ['payment_amount', 'amount', 'amountIdr', 'nilai', 'total'],
     currency: ['currency', 'curr', 'matauang'],
+    /**
+     * NOT MAPPED to production's deviation columns on purpose. KLIP exposes
+     * `dp_date_deviation_days` and `payoff_date_deviation_days`, which measure the down
+     * payment and the payoff - not invoice due versus paid. The tool already derives
+     * deviation from dueDate and paidDate, so leaving this unmatched yields the derived
+     * figure instead of a wrong reported one.
+     */
     deviationDays: ['deviationDays', 'deviation_days', 'deviasiHari'],
   },
 

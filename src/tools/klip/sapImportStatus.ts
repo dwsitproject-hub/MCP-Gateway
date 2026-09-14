@@ -25,27 +25,33 @@ const inputShape = {
     .describe(`How many recent imports to return (max ${CAP}).`),
 };
 
+/**
+ * `finished_at` and `message` are NOT here. KLIP production returns nine keys on this
+ * endpoint and neither is among them (measured across every row, 14 Sep 2026), so the
+ * map was producing a permanent null that read as "the import never finished" and "the
+ * import reported nothing wrong". Both are claims, and neither was ours to make.
+ * `import_timestamp` exists and might be a completion time, but calling it one without
+ * KLIP saying so is how a guess becomes a field name. Reported as not_available instead.
+ */
 interface ImportRow {
   import_id: string | null;
   started_at: string | null;
-  finished_at: string | null;
   status: string | null;
   rows_processed: number | null;
   rows_failed: number | null;
   file_name: string | null;
-  message: string | null;
 }
 
 function mapRow(row: Row): ImportRow {
   return {
     import_id: pickString(row, fields.sapImport.id),
     started_at: toWibIso(pickString(row, fields.sapImport.startedAt)),
-    finished_at: toWibIso(pickString(row, fields.sapImport.finishedAt)),
+
     status: pickString(row, fields.sapImport.status),
     rows_processed: pickNumber(row, fields.sapImport.rowsProcessed),
     rows_failed: pickNumber(row, fields.sapImport.rowsFailed),
     file_name: pickString(row, fields.sapImport.fileName),
-    message: pickString(row, fields.sapImport.message),
+
   };
 }
 
@@ -83,6 +89,12 @@ export const sapImportStatus: ToolDefinition<typeof inputShape> = {
         // truncated now reports COVERAGE only; the display bound is stated here instead.
         rows_shown: imports.length,
         matching_rows: walked.rows.length,
+        not_available:
+          'A completion time and an error message are NOT available: KLIP returns nine fields on this '  +
+          'endpoint and neither appears on any row (measured on production, 14 Sep 2026). The tool used to '  +
+          'map both and emit a permanent null, which read as "never finished" and "reported nothing wrong" '  +
+          '- two claims we were in no position to make. Use started_at with status, and the KLIP import '  +
+          'screen for row-level errors.',
         /**
          * The future-timestamp warning is GONE, at the KLIP team's request on 28 Aug 2026,
          * because they found and repaired what caused it.

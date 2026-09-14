@@ -45,6 +45,17 @@ const MIN_PASSWORD_LENGTH = 12;
 // helpers
 // ---------------------------------------------------------------------------
 
+/** Walk a dotted path. Local to the CLI so the probe can look where extractRows
+ *  declines to - see the single-object case in routes:verify-fields. */
+function dig(body: unknown, path: string): unknown {
+  let cursor: unknown = body;
+  for (const segment of path.split('.')) {
+    if (cursor === null || typeof cursor !== 'object') return undefined;
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+  return cursor;
+}
+
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -539,7 +550,18 @@ async function cmdRoutesVerifyFields(): Promise<void> {
           out(`${label.padEnd(22)} 404   ${probePath}  <-- path is wrong, fix routes.ts`);
           continue;
         }
-        const rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
+        let rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
+        if (rows.length === 0) {
+          // extractRows yields ARRAYS only. A detail endpoint returns a single object at
+          // the same declared path - /contracts/:id puts it at data.contract - so zero
+          // rows there means "not an array", not "not found", and reporting EMPTY reads
+          // as a broken route when the route is fine. Probe-only: production pagination
+          // is untouched, because there a non-array genuinely is the wrong shape.
+          const at = dig(body, route.rowsPath);
+          if (at !== null && typeof at === 'object' && !Array.isArray(at)) {
+            rows = [at as Record<string, unknown>];
+          }
+        }
         if (rows.length === 0) {
           // Say what the body DOES contain, so an empty result can be read as a wrong
           // rowsPath rather than filed as "no data" and forgotten.

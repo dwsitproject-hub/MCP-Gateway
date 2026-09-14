@@ -71,10 +71,10 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
       const dispatched = pickNumber(row, fields.trucking.dispatched);
       const received = pickNumber(row, fields.trucking.received);
       return {
-        sequence: pickString(row, fields.trucking.sequence),
+
         contract_id: pickString(row, fields.trucking.contractId),
         plant: pickString(row, fields.trucking.plant),
-        truck_number: pickString(row, fields.trucking.truckNumber),
+
         sent_date: toDateOnly(pickString(row, fields.trucking.sentDate)),
         delivered_date: toDateOnly(pickString(row, fields.trucking.deliveredDate)),
         dispatched_kg: dispatched,
@@ -97,10 +97,8 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
         excluded_incomplete_weights: incomplete,
       },
       trucking: mapped.slice(0, limit).map((m) => ({
-        sequence: m.sequence,
         contract_id: m.contract_id,
         plant: m.plant,
-        truck_number: m.truck_number,
         sent_date: m.sent_date,
         delivered_date: m.delivered_date,
         dispatched_mt: kgToMt(m.dispatched_kg),
@@ -109,6 +107,12 @@ export const truckingOps: ToolDefinition<typeof inputShape> = {
       })),
       rows_shown: Math.min(mapped.length, limit),
     };
+
+    data.not_available =
+      'Truck identity is not exposed by KLIP: neither a truck/plate number nor a per-truck sequence ' +
+      'appears on any of the 52 fields this endpoint returns (measured on production, 14 Sep 2026). ' +
+      'Rows here are trucking OPERATIONS against a contract, not individual truck movements, so a ' +
+      'question about a specific truck cannot be answered from this connector at all.';
 
     if (walked.truncated) {
       data.partial_totals_warning =
