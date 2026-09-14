@@ -505,6 +505,9 @@ async function cmdRoutesVerifyFields(): Promise<void> {
   out(`Deep-probing ${cfg.KLIP_BASE_URL} (KLIP_ENV=${cfg.KLIP_ENV})\n`);
   const all = routes as Record<string, RouteContract>;
   let sampleContractId: string | undefined;
+  let sampleNumericId: string | undefined;
+
+  const SCAN = 50;
 
   for (const [name, mapKey] of FIELD_MAPS) {
     const route = all[name];
@@ -513,49 +516,86 @@ async function cmdRoutesVerifyFields(): Promise<void> {
 
     let path = route.path;
     const params: Record<string, string | number> = {};
-    if (route.params.limit !== undefined) params[route.params.limit] = 1;
+    if (route.params.limit !== undefined) params[route.params.limit] = SCAN;
     if (route.params.page !== undefined) params[route.params.page] = 1;
 
-    if (path.includes(':')) {
-      if (sampleContractId === undefined) {
-        out(`${name.padEnd(22)} SKIP  (no sample id available from /contracts)`);
-        continue;
-      }
-      path = path.replace(/:\w+/, encodeURIComponent(sampleContractId));
+    // contractById takes a path id, and WHICH id is the open question: contract rows
+    // carry both a numeric `id` and a string `contract_id`. Trying one and reporting
+    // EMPTY cannot tell "wrong id" apart from "wrong rowsPath", so try both.
+    const idCandidates = path.includes(':')
+      ? [sampleNumericId, sampleContractId].filter((v): v is string => v !== undefined)
+      : [undefined];
+    if (path.includes(':') && idCandidates.length === 0) {
+      out(`${name.padEnd(22)} SKIP  (no sample id available from /contracts)`);
+      continue;
     }
 
-    try {
-      const body = await authorizedGet<unknown>(path, params);
-      if (body === undefined) {
-        out(`${name.padEnd(22)} 404   ${path}  <-- path is wrong, fix routes.ts`);
-        continue;
-      }
-      const rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
-      const row = rows[0];
-      if (row === undefined) {
-        // An empty result proves the path resolves and NOTHING about the contract.
-        // Saying so beats printing a reassuring zero.
-        out(`${name.padEnd(22)} EMPTY - no row returned, so the field map is UNPROVEN here`);
-        continue;
-      }
+    for (const id of idCandidates) {
+      const probePath = id === undefined ? path : path.replace(/:\w+/, encodeURIComponent(id));
+      const label = id === undefined ? name : `${name}[${id}]`;
+      try {
+        const body = await authorizedGet<unknown>(probePath, params);
+        if (body === undefined) {
+          out(`${label.padEnd(22)} 404   ${probePath}  <-- path is wrong, fix routes.ts`);
+          continue;
+        }
+        const rows = extractRows<Record<string, unknown>>(body, route.rowsPath);
+        if (rows.length === 0) {
+          // Say what the body DOES contain, so an empty result can be read as a wrong
+          // rowsPath rather than filed as "no data" and forgotten.
+          const top = body === null || typeof body !== 'object' ? String(body) : Object.keys(body).join(', ');
+          const data = (body as Record<string, unknown>)['data'];
+          const inner =
+            data === null || data === undefined || typeof data !== 'object'
+              ? String(data)
+              : Array.isArray(data)
+                ? `array(${data.length})`
+                : Object.keys(data).slice(0, 20).join(', ');
+          out(`${label.padEnd(22)} EMPTY at rowsPath='${route.rowsPath}' - body keys: ${top} | data: ${inner}`);
+          continue;
+        }
 
-      const missing: string[] = [];
-      let present = 0;
-      for (const [logical, alts] of Object.entries(map)) {
-        if (alts.some((a) => a in row)) present += 1;
-        else missing.push(logical);
-      }
-      const total = present + missing.length;
-      const verdict = missing.length === 0 ? 'ALL PRESENT' : `${missing.length} MISSING`;
-      out(`${name.padEnd(22)} ${verdict}  (${present}/${total} mapped, row carries ${Object.keys(row).length} keys)`);
-      for (const f of missing) out(`${' '.repeat(22)}   MISSING ${f} -> tried: ${(map[f] ?? []).join(', ')}`);
+        const scanned = rows.slice(0, SCAN);
+        const union = new Set<string>();
+        for (const r of scanned) for (const k of Object.keys(r)) union.add(k);
 
-      if (name === 'contracts') {
-        const id = row['contract_id'] ?? row['id'];
-        if (id !== undefined) sampleContractId = String(id);
+        const absent: string[] = [];
+        const sparse: Array<[string, number]> = [];
+        let always = 0;
+        for (const [logical, alts] of Object.entries(map)) {
+          const hits = scanned.filter((r) => alts.some((a) => a in r)).length;
+          if (hits === scanned.length) always += 1;
+          else if (hits === 0) absent.push(logical);
+          else sparse.push([logical, hits]);
+        }
+
+        const total = Object.keys(map).length;
+        out(
+          `${label.padEnd(22)} ${scanned.length} rows | ${always}/${total} always present` +
+            `${absent.length > 0 ? ` | ${absent.length} ABSENT` : ''}` +
+            `${sparse.length > 0 ? ` | ${sparse.length} sparse` : ''}`,
+        );
+        // ABSENT means no alternate appeared on ANY scanned row - a real mapping
+        // defect. SPARSE means the field exists but is omitted when null, which is a
+        // data fact about the rows, not a bug in the map. Conflating the two is how a
+        // working field map gets "fixed" into a broken one.
+        for (const f of absent) out(`${' '.repeat(22)}   ABSENT ${f} -> tried: ${(map[f] ?? []).join(', ')}`);
+        for (const [f, n] of sparse) out(`${' '.repeat(22)}   sparse ${f} present on ${n}/${scanned.length} rows`);
+        if (absent.length > 0) {
+          out(`${' '.repeat(22)}   keys actually present (${union.size}): ${[...union].sort().join(', ')}`);
+        }
+
+        if (name === 'contracts') {
+          const first = scanned[0];
+          if (first !== undefined) {
+            if (first['id'] !== undefined) sampleNumericId = String(first['id']);
+            if (first['contract_id'] !== undefined) sampleContractId = String(first['contract_id']);
+          }
+        }
+        if (rows.length > 0 && path.includes(':')) break; // one working id is enough
+      } catch (err) {
+        out(`${label.padEnd(22)} FAIL  ${(err as Error).message}`);
       }
-    } catch (err) {
-      out(`${name.padEnd(22)} FAIL  ${(err as Error).message}`);
     }
   }
 
