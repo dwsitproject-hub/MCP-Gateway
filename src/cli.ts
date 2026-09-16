@@ -822,7 +822,13 @@ async function cmdJettyVerify(): Promise<void> {
         const keys = Object.keys(v);
         const shown = keys.slice(0, 12).map((k) => {
           const inner = (v as Record<string, unknown>)[k];
-          return Array.isArray(inner) ? `${k}[${inner.length}]` : k;
+          if (Array.isArray(inner)) return `${k}[${inner.length}]`;
+          if (inner === null) return `${k}:null`;
+          // Show the VALUE for scalars. A body reported as {error} names a problem and
+          // withholds it; the message is the whole content of that response.
+          if (typeof inner === 'string') return `${k}:${JSON.stringify(inner.slice(0, 80))}`;
+          if (typeof inner !== 'object') return `${k}:${String(inner)}`;
+          return `${k}{${Object.keys(inner).slice(0, 6).join(',')}}`;
         });
         return `{${shown.join(', ')}${keys.length > 12 ? ', …' : ''}}`;
       };
@@ -837,7 +843,10 @@ async function cmdJettyVerify(): Promise<void> {
         rows = Array.isArray(at) ? (at as Array<Record<string, unknown>>) : [];
         shape = Array.isArray(at)
           ? `${route.rowsPath}(${rows.length})`
-          : `NO ARRAY AT '${route.rowsPath}' - body is ${describeKeys(body)}`;
+          // Describe what that key actually HOLDS. "the array is not there" and "the
+          // array is now keyed by id" call for different fixes, and the first message
+          // cannot tell them apart.
+          : `NO ARRAY AT '${route.rowsPath}' - that key holds ${describeKeys(at)}`;
       }
 
       // Drift in the wrong direction is worth naming: staging timings are recorded on
