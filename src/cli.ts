@@ -849,6 +849,19 @@ async function cmdJettyVerify(): Promise<void> {
         shape = Array.isArray(body) ? `array(${rows.length})` : `NOT AN ARRAY - got ${describeKeys(body)}`;
       } else {
         const at = (body as Record<string, unknown> | null)?.[route.rowsPath];
+        if (route.keyedById === true && !Array.isArray(at) && at !== null && typeof at === 'object') {
+          // Declared keyed, and keyed is what arrived. Counting the null values matters:
+          // a null there means JPS holds no reading for that id, which the tool reports
+          // as "no figure" rather than as a zero.
+          const entries = Object.entries(at as Record<string, unknown>);
+          const empty = entries.filter(([, v]) => v === null).length;
+          rows = entries.filter(([, v]) => v !== null).map(([, v]) => v as Record<string, unknown>);
+          out(
+            `${name.padEnd(22)} OK    ${String(ms).padStart(5)} ms  ` +
+              `${route.rowsPath}{${entries.length} keyed${empty > 0 ? `, ${empty} null` : ''}}`,
+          );
+          continue;
+        }
         rows = Array.isArray(at) ? (at as Array<Record<string, unknown>>) : [];
         shape = Array.isArray(at)
           ? `${route.rowsPath}(${rows.length})`

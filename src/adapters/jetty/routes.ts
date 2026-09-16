@@ -1,7 +1,13 @@
 /**
  * Jetty Planning System (JPS) route contracts — Phase 1, read-only.
  *
- * EVERY ENTRY HERE WAS PROBED AGAINST STAGING ON 11 SEP 2026, not copied from the
+ * RE-PROBED AGAINST PRODUCTION ON 16 SEP 2026 (`jetty:verify`), after the connector
+ * was pointed at http://172.28.80.51:3000/api/v1. That run was not a formality: the
+ * cargo-progress payload had CHANGED SHAPE between the two environments, and the tool
+ * threw "not iterable" against production while passing ten tests against a fixture
+ * built from staging. Every other route matched its contract.
+ *
+ * EVERY ENTRY HERE WAS FIRST PROBED AGAINST STAGING ON 11 SEP 2026, not copied from the
  * Technical Documentation. That ordering is the main lesson from the KLIP connector:
  * there, thirteen routes were written from assumptions, all thirteen were wrong in some
  * detail, and finding out cost weeks and two false defect reports. The TechDoc is
@@ -71,6 +77,14 @@ export interface JettyRoute {
    * the array sits under it; null means the response is a single object, not rows.
    */
   rowsPath: string | null;
+  /**
+   * True when the value at rowsPath is an OBJECT KEYED BY ID rather than an array.
+   *
+   * Added after production's cargo-progress arrived keyed and every probe reported it
+   * as a broken route. Declaring the shape beats teaching each reader to recognise it,
+   * and it keeps "this endpoint is keyed" separate from "this endpoint is broken".
+   */
+  keyedById?: boolean;
   /** True when port scope travels as the x-port-id header (the usual case). */
   portHeader: boolean;
   verifiedOn: string;
@@ -86,7 +100,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: '',
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 97,
     notes:
       'Bare array of alongside operations (status not SAILED, TB set) - the Live Ops board. Rows are ' +
@@ -100,8 +114,9 @@ export const jettyRoutes = {
     path: '/operations/at-berth/cargo-progress',
     params: {},
     rowsPath: 'summaries',
+    keyedById: true,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 874,
     notes:
       'TWO SHAPES IN THE WILD. Production (16 Sep 2026) returns `summaries` as an OBJECT KEYED BY ' +
@@ -125,7 +140,7 @@ export const jettyRoutes = {
     },
     rowsPath: '',
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 60,
     notes:
       'Bare array. Per the TechDoc the date filter is an ETA window over COALESCE(plan.eta, ' +
@@ -140,7 +155,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 65,
     notes:
       'Object { queue, berths, scheduleQueue } - live berth occupancy feeding the schematic and the ' +
@@ -152,7 +167,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 58,
     notes:
       'Object with the SAME top-level keys as /allocation/overview { queue, berths, scheduleQueue }, ' +
@@ -166,7 +181,7 @@ export const jettyRoutes = {
     params: { startDate: 'start_date', endDate: 'end_date' },
     rowsPath: '',
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 70,
     notes:
       'Bare array of plans in an ETA window, with SI children and cargo breakdown. Rows carry id, ' +
@@ -179,7 +194,7 @@ export const jettyRoutes = {
     params: { startDate: 'start_date', endDate: 'end_date', purposes: 'purposes', commodityIds: 'commodity_ids' },
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 48,
     notes:
       'Object { mode, usedSlots, totalSlots, pct, dayCount, overCapacity, items }. `mode` IS THE TIME ' +
@@ -193,7 +208,7 @@ export const jettyRoutes = {
     params: { startDate: 'start_date', endDate: 'end_date', purposes: 'purposes', commodityIds: 'commodity_ids' },
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 78,
     notes:
       'Object { mode, count, overHoursSum, dayCount, items } - past-ETC count and overdue hours. Same ' +
@@ -205,7 +220,7 @@ export const jettyRoutes = {
     params: { startDate: 'start_date', endDate: 'end_date', purposes: 'purposes', commodityIds: 'commodity_ids' },
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 24,
     notes:
       'Object with six stage counts - shipmentRequest, incoming, plannedBerthing, atBerth, readyToSail, ' +
@@ -219,7 +234,7 @@ export const jettyRoutes = {
     params: { startDate: 'start_date', endDate: 'end_date', purposes: 'purposes', commodityIds: 'commodity_ids' },
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 25,
     notes:
       'Object { totalSlots, weeks }. Segments are at most 7 days in UTC; future weeks are projections ' +
@@ -232,7 +247,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 818,
     notes:
       'Object { staleThresholdMs, checkedAt, totalEnabled, staleCount, allHealthy, sources, ' +
@@ -246,7 +261,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: null,
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 41,
     notes:
       'Object { commodities, tradeTerms, purposes, shippers, loadingPorts, surveyors, agents, jetties, ' +
@@ -260,7 +275,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: '',
     portHeader: true,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 17,
     notes: 'Bare array, 8 jetties on staging: slots, length, max draft, max DWT, allowed commodities, status.',
   },
@@ -270,7 +285,7 @@ export const jettyRoutes = {
     params: {},
     rowsPath: '',
     portHeader: false,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 820,
     notes:
       'Bare array. ONE port on staging: BONTANG, id 1. Every user is assigned it, which is why port ' +
@@ -282,7 +297,7 @@ export const jettyRoutes = {
     params: { portId: 'portId' },
     rowsPath: '',
     portHeader: false,
-    verifiedOn: '2026-09-11',
+    verifiedOn: '2026-09-16',
     observedMs: 41,
     notes:
       'Bare array, 60 tanks. THE ODD ONE OUT: it rejects the x-port-id header and returns 400 "portId ' +
