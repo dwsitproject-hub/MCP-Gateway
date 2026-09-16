@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { jettyRoutes } from './../../adapters/jetty/routes.js';
 import { jettyGet, type JettyCallRecord } from './../../adapters/jetty/session.js';
 import { jettyConfigured } from './../../adapters/jetty/client.js';
+import { cfg } from './../../core/config.js';
 import { capabilityUnavailable } from './../../core/errors.js';
 import { toWibIso } from './../../adapters/klip/normalize.js';
 import { describe, type ToolDefinition, type ToolOutcome } from './../klip/types.js';
@@ -46,6 +47,8 @@ const inputShape = {
 /** JPS rows are camelCase; these are the fields this tool reads. */
 interface AtBerthRow {
   id?: string | number;
+  portId?: string | number;
+  portName?: string;
   jettyOperationCode?: string;
   vesselName?: string;
   jettyName?: string;
@@ -242,6 +245,16 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
     const noReading = vessels.filter((v) => v.cargo_moved === null).map((v) => v.vessel_name);
     const data: Record<string, unknown> = {
       vessels,
+      // EVERY JPS figure is port-scoped, and nothing in a row reveals it unless it is
+      // said. Without this a reader cannot tell whether "6 vessels alongside" means the
+      // whole estate or one terminal, and a careful one has to caveat every answer.
+      port_scope: {
+        port_id: all[0]?.portId ?? cfg.JETTY_PORT_ID ?? null,
+        port_name: all[0]?.portName ?? null,
+        note:
+          'These are the berths at THIS port only. The connector is scoped to one port by ' +
+          'configuration; JPS holds no others in this deployment.',
+      },
       vessels_alongside: all.length,
       rows_shown: vessels.length,
       atg_sync: {

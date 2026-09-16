@@ -197,6 +197,16 @@ export const jettyTankFarm: ToolDefinition<typeof inputShape> = {
 
     const data: Record<string, unknown> = {
       tanks,
+      // Tank rows carry no port of their own, so the scope is the configured one and is
+      // stated as exactly that - an inferred port name would be a guess about which
+      // terminal a stock figure belongs to.
+      port_scope: {
+        port_id: cfg.JETTY_PORT_ID ?? null,
+        note:
+          'Tanks at THIS port only, scoped by configuration rather than by anything in the rows. ' +
+          'The tank rows do not name their port, so this is the connector scope, not a field ' +
+          'JPS returned.',
+      },
       tanks_matching: matched.length,
       tanks_at_this_port: all.length,
       rows_shown: tanks.length,
