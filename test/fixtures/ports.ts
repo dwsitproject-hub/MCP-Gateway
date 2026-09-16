@@ -31,4 +31,5 @@ export const PORTS = {
   hub: 5202,
   hubDws: 5203,
   hubNonce: 5204,
+  adminUi: 5205,
 } as const;

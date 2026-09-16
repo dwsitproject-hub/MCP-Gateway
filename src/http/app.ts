@@ -23,6 +23,7 @@ import { jwks } from './../auth/keys.js';
 import { SCOPE } from './../auth/tokens.js';
 import { handleMcpRequest } from './../mcp/server.js';
 import { consentRouter } from './consent.js';
+import { adminRouter } from './admin.js';
 import { healthRouter } from './health.js';
 import { validateOrigin } from './origin.js';
 import { clientIpOf } from './clientIp.js';
@@ -123,6 +124,8 @@ export function createApp(): Express {
   );
 
   app.use(consentRouter());
+  // The pilot-list UI. Hub sign-in plus an is_admin flag only the CLI can grant.
+  app.use(adminRouter());
 
   // --- MCP endpoint ---------------------------------------------------------
   const bearer = requireBearerAuth({

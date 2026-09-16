@@ -47,6 +47,7 @@ export interface UserRow {
   auth_source: AuthSource;
   hub_subject: string | null;
   is_break_glass: boolean;
+  is_admin: boolean;
 }
 
 export interface User {
@@ -55,6 +56,18 @@ export interface User {
   displayName: string | null;
   mustChangePassword: boolean;
   authSource: AuthSource;
+}
+
+/** One row of the pilot list as the admin UI shows it. */
+export interface PilotRow {
+  email: string;
+  displayName: string | null;
+  authSource: AuthSource;
+  isBreakGlass: boolean;
+  isAdmin: boolean;
+  disabled: boolean;
+  hubLinked: boolean;
+  lastLoginAt: Date | null;
 }
 
 export type AuthResult =
@@ -83,10 +96,22 @@ export async function isActive(userId: string): Promise<boolean> {
 }
 
 export async function list(): Promise<
-  Array<Pick<UserRow, 'email' | 'display_name' | 'auth_source' | 'is_break_glass' | 'disabled_at' | 'locked_until' | 'hub_subject'>>
+  Array<
+    Pick<
+      UserRow,
+      | 'email'
+      | 'display_name'
+      | 'auth_source'
+      | 'is_break_glass'
+      | 'is_admin'
+      | 'disabled_at'
+      | 'locked_until'
+      | 'hub_subject'
+    >
+  >
 > {
   return query(
-    `SELECT email, display_name, auth_source, is_break_glass, disabled_at, locked_until, hub_subject
+    `SELECT email, display_name, auth_source, is_break_glass, is_admin, disabled_at, locked_until, hub_subject
        FROM users ORDER BY is_break_glass DESC, email`,
   );
 }
@@ -164,6 +189,52 @@ export async function addBreakGlassUser(email: string, password: string, display
  * local password is exactly the unwatched second way in that the one-account rule
  * exists to prevent - the flag would say Hub-only while the password path stayed open.
  */
+/** The pilot list, shaped for display. Break-glass first, then alphabetical. */
+export async function listPilots(): Promise<PilotRow[]> {
+  const rows = await query<UserRow & { last_login_at: Date | null }>(
+    `SELECT email, display_name, auth_source, is_break_glass, is_admin, disabled_at, hub_subject, last_login_at
+       FROM users ORDER BY is_break_glass DESC, email`,
+  );
+  return rows.map((r) => ({
+    email: r.email,
+    displayName: r.display_name,
+    authSource: r.auth_source,
+    isBreakGlass: r.is_break_glass,
+    isAdmin: r.is_admin,
+    disabled: r.disabled_at !== null,
+    hubLinked: r.hub_subject !== null,
+    lastLoginAt: r.last_login_at,
+  }));
+}
+
+/**
+ * Grant or revoke administrator rights over the pilot list.
+ *
+ * Revoking the LAST admin is refused. Not tidiness: the only way back would be shell
+ * access to the host, and an admin UI whose own controls can lock every administrator
+ * out of it is a trap that looks like a working feature right up until it is used.
+ */
+export async function setAdmin(email: string, isAdmin: boolean): Promise<void> {
+  const target = await findByEmail(email);
+  if (target === undefined) throw new Error(`no such user: ${email.trim()}`);
+
+  if (!isAdmin && target.is_admin) {
+    const others = await query<{ email: string }>(
+      'SELECT email FROM users WHERE is_admin = TRUE AND disabled_at IS NULL AND lower(email) <> lower($1)',
+      [email.trim()],
+    );
+    if (others.length === 0) {
+      throw new Error(
+        `${target.email} is the only administrator. Grant another one first (user:grant-admin <email>), ` +
+          'or the pilot list becomes editable only from a shell on the host.',
+      );
+    }
+  }
+
+  await query('UPDATE users SET is_admin = $2 WHERE lower(email) = lower($1)', [email.trim(), isAdmin]);
+  logger.warn({ email: target.email, isAdmin }, 'administrator rights changed');
+}
+
 export async function clearBreakGlass(email: string): Promise<void> {
   const target = await findByEmail(email);
   if (target === undefined) throw new Error(`no such user: ${email.trim()}`);

@@ -31,6 +31,10 @@ import {
   renderNotPermittedPage,
 } from './../auth/loginPage.js';
 import { clientIpOf } from './clientIp.js';
+import * as users from './../auth/users.js';
+import { renderNotAdminPage } from './../auth/adminPage.js';
+import { ADMIN_COOKIE_MAX_AGE_MS, ADMIN_ROUND_TRIP } from './admin.js';
+import { ADMIN_SESSION_COOKIE, adminCookieOptions, issueAdminSession } from './../auth/adminSession.js';
 
 const MIN_PASSWORD_LENGTH = 12;
 

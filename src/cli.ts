@@ -12,6 +12,8 @@
  *   user:add <email> [name]        add a pilot user who signs in via Downstream Hub
  *   user:add-break-glass <email>   provision the single local emergency account
  *   user:clear-break-glass <email> demote it back to an ordinary Hub pilot user
+ *   user:grant-admin <email>       let them manage the pilot list at /admin
+ *   user:revoke-admin <email>      take that back
  *   hub:check                      verify Hub OIDC discovery and print the redirect_uri
  *   user:disable <email>           disable and revoke every token they hold
  *   user:enable <email>            re-enable
@@ -234,7 +236,7 @@ async function cmdUserList(): Promise<void> {
     out('no users yet - add a pilot user with: user:add <email>');
     return;
   }
-  out('EMAIL                                    SIGN-IN      STATE      HUB LINKED');
+  out('EMAIL                                    SIGN-IN      STATE      HUB LINKED  ADMIN');
   for (const r of rows) {
     const state =
       r.disabled_at !== null
@@ -245,13 +247,56 @@ async function cmdUserList(): Promise<void> {
     const source = r.is_break_glass ? 'break-glass' : r.auth_source;
     out(
       `${r.email.padEnd(40)} ${source.padEnd(12)} ${state.padEnd(10)} ` +
-        `${r.hub_subject !== null ? 'yes' : r.auth_source === 'hub' ? 'not yet' : '-'}`,
+        `${(r.hub_subject !== null ? 'yes' : r.auth_source === 'hub' ? 'not yet' : '-').padEnd(11)} ` +
+        `${r.is_admin ? 'yes' : '-'}`,
     );
   }
   const active = await users.countActivePilots();
   out(`\n${active} of ${PILOT_CAP} pilot places used (PRD Section 16).`);
   out(`Hub OIDC: ${cfg.hubEnabled ? `configured (${cfg.HUB_ISSUER ?? ''})` : 'NOT configured'}`);
   out(`Break-glass password path: ${cfg.BREAK_GLASS_ENABLED ? 'enabled' : 'disabled'}`);
+  const admins = rows.filter((r) => r.is_admin).map((r) => r.email);
+  out(
+    admins.length > 0
+      ? `Pilot-list admins (/admin): ${admins.join(', ')}`
+      : 'Pilot-list admins (/admin): NONE - the UI is unreachable until one is granted here.',
+  );
+}
+
+/**
+ * Grant or revoke the right to manage the pilot list from the web UI.
+ *
+ * This lives in the CLI and nowhere else ON PURPOSE. /admin can add pilot users, but it
+ * cannot make anyone an administrator - so the first admin, and every later one, needs
+ * shell access to the host. A page on the public internet that can promote its own
+ * callers is a self-service door, and this host is scanned for exactly that.
+ */
+async function cmdGrantAdmin(args: string[]): Promise<void> {
+  const email = args[0];
+  if (email === undefined) throw new Error('usage: user:grant-admin <email>');
+  await users.setAdmin(email, true);
+  await audit.write({
+    event: 'admin_action',
+    ctx: { requestId: audit.newRequestId(), userId: 'cli' },
+    outcome: 'admin_granted',
+    detail: { email: email.trim().toLowerCase(), severity: 'high' },
+  });
+  out(`${email.trim().toLowerCase()} can now manage the pilot list at ${cfg.PUBLIC_URL}/admin`);
+  out('They must also be on the pilot list itself - being an admin does not imply being a user.');
+}
+
+async function cmdRevokeAdmin(args: string[]): Promise<void> {
+  const email = args[0];
+  if (email === undefined) throw new Error('usage: user:revoke-admin <email>');
+  await users.setAdmin(email, false);
+  await audit.write({
+    event: 'admin_action',
+    ctx: { requestId: audit.newRequestId(), userId: 'cli' },
+    outcome: 'admin_revoked',
+    detail: { email: email.trim().toLowerCase(), severity: 'high' },
+  });
+  out(`${email.trim().toLowerCase()} can no longer manage the pilot list. Any open admin session stops`);
+  out('working on its next request - the flag is re-read from the database every time.');
 }
 
 /** Verify the Hub is reachable and its metadata is coherent, before pilot users try. */
@@ -721,6 +766,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   'user:add': cmdUserAdd,
   'user:add-break-glass': cmdBreakGlassAdd,
   'user:clear-break-glass': cmdClearBreakGlass,
+  'user:grant-admin': cmdGrantAdmin,
+  'user:revoke-admin': cmdRevokeAdmin,
   'user:disable': cmdUserDisable,
   'user:enable': cmdUserEnable,
   'user:password': cmdUserPassword,
