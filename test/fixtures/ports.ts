@@ -33,4 +33,5 @@ export const PORTS = {
   hubNonce: 5204,
   adminUi: 5205,
   adminCallback: 5206,
+  jettyTankFarm: 5207,
 } as const;

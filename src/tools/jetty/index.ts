@@ -15,10 +15,12 @@
 import { jettyConfigured } from './../../adapters/jetty/client.js';
 import type { InputShape, ToolDefinition } from './../klip/types.js';
 import { jettyAtBerth } from './atBerth.js';
+import { jettyTankFarm } from './tankFarm.js';
 
 /** Every jetty tool, whether or not this deployment can reach JPS. */
 export const allJettyTools: ReadonlyArray<ToolDefinition<InputShape>> = [
   jettyAtBerth as unknown as ToolDefinition<InputShape>,
+  jettyTankFarm as unknown as ToolDefinition<InputShape>,
 ];
 
 /** What this deployment actually exposes. */

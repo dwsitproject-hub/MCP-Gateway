@@ -294,6 +294,9 @@ export const getContract: ToolDefinition<typeof inputShape> = {
         received_mt: kgToMt(pickNumber(merged, fields.contract.received)),
         outstanding_mt: kgToMt(line.outstanding_kg),
         outstanding_basis: line.basis,
+        unit_price: pickNumber(merged, fields.contract.unitPrice),
+        contract_value: pickNumber(merged, fields.contract.contractValue),
+        currency: pickString(merged, fields.contract.currency),
         data_quality: line.data_quality,
       },
       shipments,
@@ -308,6 +311,13 @@ export const getContract: ToolDefinition<typeof inputShape> = {
           'shipped_mt, received_mt and outstanding_mt are UNKNOWN here: the detail record does not store them ' +
           'and the contracts list did not return this contract. Unknown is not zero - check the KLIP ' +
           'Contracts page before reporting a quantity.',
+      price_note:
+        'unit_price and contract_value are KLIP\'s own figures, in `currency`. This connector does NOT ' +
+        'multiply price by quantity: quantities are stored in KILOGRAMS behind a unit field that reads MT ' +
+        'or KG depending on the endpoint, and KLIP does not state whether unit_price is per kilogram or ' +
+        'per tonne - the two readings differ by a factor of 1000. contract_value is the total KLIP itself ' +
+        'computed, so quote that rather than deriving one. If a figure for a partial quantity is needed, ' +
+        'ask KLIP what basis unit_price uses before calculating anything.',
       remarks_note:
         'KLIP exposes no remark TEXT through its API. The contracts list carries a remarks_count only, and the ' +
         'detail record carries neither (measured across ten contracts, 14 Sep 2026), so remarks are not ' +

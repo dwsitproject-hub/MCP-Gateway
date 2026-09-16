@@ -94,8 +94,22 @@ export const fields = {
     received: ['quantity_receive', 'qtyReceived', 'qty_received', 'receivedQty'],
     /** KLIP computes this itself - useful as a cross-check on our own arithmetic. */
     outstandingUpstream: ['outstanding_quantity'],
-    /** Per-row unit of measure. Observed "MT" on contracts. */
+    /** Per-row unit of measure. Observed "MT" on contracts (production says "KG"). */
     unit: ['unit', 'uom', 'unitOfMeasure'],
+    /**
+     * PRICE. Present on BOTH endpoints all along - 66 keys on the list, 37 on the
+     * detail, measured 14 Sep 2026 - and never mapped, so the connector answered "not
+     * exposed by the API" about a field KLIP had been returning the whole time. The
+     * page showed it and the tool could not.
+     *
+     * THE BASIS IS NOT STATED. Quantities on this endpoint are KILOGRAMS behind a unit
+     * field that says MT, so whether unit_price is per kg or per MT cannot be read off
+     * the payload, and the two answers differ by 1000x. Nothing here multiplies:
+     * contract_value is KLIP's own total and is reported instead.
+     */
+    unitPrice: ['unit_price', 'unitPrice', 'harga_satuan'],
+    contractValue: ['contract_value', 'contractValue', 'nilai_kontrak'],
+    currency: ['currency', 'curr', 'mata_uang'],
     contractDate: ['contractDate', 'contract_date', 'tanggalKontrak', 'date'],
     /**
      * REMOVED 14 Sep 2026. Absent from all 50 list rows and all 10 detail records in

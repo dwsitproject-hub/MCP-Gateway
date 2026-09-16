@@ -26,10 +26,16 @@ export interface MockJettyState {
   cargoShape: 'object' | 'array';
   /** Per-vessel gauge state, distinct from the port-level ATG health. */
   gaugeConnected: boolean;
+  /**
+   * What the tank farm's mass column is actually in. JPS labels only density, so the
+   * tool works this out from volume x density; 'broken' returns figures that match
+   * neither reading, which must be reported as unknown rather than rounded into one.
+   */
+  tankMassUnit: 'kg' | 'tonne' | 'broken';
 }
 
 export function freshJettyState(): MockJettyState {
-  return { requests: [], staleSources: 0, cargoShape: 'object', gaugeConnected: true };
+  return { requests: [], staleSources: 0, cargoShape: 'object', gaugeConnected: true, tankMassUnit: 'kg' };
 }
 
 /** A structurally real JWT with an 8-hour life, matching what JPS issues. */
@@ -180,6 +186,41 @@ export function createMockJetty(state: MockJettyState): Express {
       sources: [],
       staleSources: [],
     });
+  });
+
+  // The odd one out: port arrives as a QUERY parameter here and the route 400s without
+  // it, unlike every other endpoint which reads the x-port-id header.
+  app.get('/api/v1/tank-gauging/latest', (req: Request, res: Response) => {
+    if (!requireBearer(req, res)) return;
+    if (req.query.portId === undefined) {
+      res.status(400).json({ error: 'portId is required' });
+      return;
+    }
+    const scale = state.tankMassUnit === 'kg' ? 1 : state.tankMassUnit === 'tonne' ? 1000 : 37;
+    const tank = (code: string, product: string, volume: number, density: number) => ({
+      tankId: code,
+      code,
+      name: `Tank ${code}`,
+      productName: product,
+      levelMm: 8200,
+      temperatureC: 45.2,
+      observedDensityKgM3: density,
+      totalObservedVolume: volume,
+      totalMass: (volume * density) / scale,
+      flowRateTph: 0,
+      statusText: 'Static',
+      levelMovement: 'STABLE',
+    });
+    res.json([
+      tank('T-01', 'CPO', 1000, 900),
+      tank('T-02', 'CPO', 2000, 900),
+      tank('T-03', 'PKO', 500, 920),
+      // No mass reading at all: must be excluded from the total AND counted, never
+      // silently treated as an empty tank.
+      { tankId: 'T-04', code: 'T-04', name: 'Tank T-04', productName: 'CPO', levelMm: null,
+        temperatureC: null, observedDensityKgM3: null, totalObservedVolume: null, totalMass: null,
+        flowRateTph: null, statusText: 'Out of service', levelMovement: null },
+    ]);
   });
 
   return app;
