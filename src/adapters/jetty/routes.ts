@@ -21,15 +21,22 @@
  * of record, and its API can approve a plan, sign off an operation and record a cast-off
  * that marks a vessel SAILED.
  *
- * It matters more again because of the credential. The staging service account (`MCP`,
- * id 32, email svc-mcp@energi-up.com) holds the `JPS Full Access` system role: measured
- * on 11 Sep 2026, 28 of its 31 pages carry edit and delete and 29 carry approve, with
- * only `cargo-movement` view-only. Jerry's decision was to proceed on staging and create
- * a read-only role for production. So on staging this file is the only thing standing
- * between a model and a berth operation, and it is written to be exactly that.
+ * It matters more again because of the credential, and the two environments now differ.
  *
- * PRODUCTION BLOCKER: a `JPS Read Only` role (canView only, no admin, no e2e-console)
- * assigned to the service account in place of Full Access.
+ *   STAGING     the `MCP` service account (id 32, svc-mcp@energi-up.com) holds
+ *               `JPS Full Access`: measured 11 Sep 2026, 28 of its 31 pages carry edit
+ *               and delete and 29 carry approve, only `cargo-movement` view-only. There
+ *               this file is the ONLY thing between a model and a berth operation.
+ *   PRODUCTION  a view-only role, created 16 Sep 2026 before the connector was pointed
+ *               at it. Two independent layers again: the credential cannot write, and
+ *               the client cannot express a write.
+ *
+ * The production role is RECORDED HERE, NOT MEASURED BY ANYTHING. Every other claim in
+ * this file was probed; this one rests on the role having been set up as described. It
+ * is the assumption most worth re-checking if JPS access is ever reorganised, because
+ * nothing in the connector would notice it changing - a GET-only client behaves
+ * identically against an over-privileged account and a read-only one, right up until
+ * some future code needs a second layer that turns out not to be there.
  *
  * THREE CONTRACT FACTS THAT DIFFER FROM KLIP, ALL MEASURED:
  *
