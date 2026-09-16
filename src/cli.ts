@@ -811,15 +811,33 @@ async function cmdJettyVerify(): Promise<void> {
 
       let rows: Array<Record<string, unknown>> = [];
       let shape: string;
+      // Name the keys rather than count them. "object{1 keys}" and "NO ARRAY AT
+      // 'summaries'" are both dead ends: they say the contract is wrong and not one
+      // word about what the right one would be, which costs a whole extra round trip
+      // against a system you may only be able to reach from one machine.
+      const describeKeys = (v: unknown): string => {
+        if (v === null || v === undefined) return String(v);
+        if (Array.isArray(v)) return `array(${v.length})`;
+        if (typeof v !== 'object') return typeof v;
+        const keys = Object.keys(v);
+        const shown = keys.slice(0, 12).map((k) => {
+          const inner = (v as Record<string, unknown>)[k];
+          return Array.isArray(inner) ? `${k}[${inner.length}]` : k;
+        });
+        return `{${shown.join(', ')}${keys.length > 12 ? ', …' : ''}}`;
+      };
+
       if (route.rowsPath === null) {
-        shape = body === null || typeof body !== 'object' ? String(body) : `object{${Object.keys(body).length} keys}`;
+        shape = describeKeys(body);
       } else if (route.rowsPath === '') {
         rows = Array.isArray(body) ? (body as Array<Record<string, unknown>>) : [];
-        shape = Array.isArray(body) ? `array(${rows.length})` : `NOT AN ARRAY - ${typeof body}`;
+        shape = Array.isArray(body) ? `array(${rows.length})` : `NOT AN ARRAY - got ${describeKeys(body)}`;
       } else {
         const at = (body as Record<string, unknown> | null)?.[route.rowsPath];
         rows = Array.isArray(at) ? (at as Array<Record<string, unknown>>) : [];
-        shape = Array.isArray(at) ? `${route.rowsPath}(${rows.length})` : `NO ARRAY AT '${route.rowsPath}'`;
+        shape = Array.isArray(at)
+          ? `${route.rowsPath}(${rows.length})`
+          : `NO ARRAY AT '${route.rowsPath}' - body is ${describeKeys(body)}`;
       }
 
       // Drift in the wrong direction is worth naming: staging timings are recorded on
