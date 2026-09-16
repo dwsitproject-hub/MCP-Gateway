@@ -86,6 +86,75 @@ async function loadPending(req: Request, res: Response): Promise<PendingAuthoriz
   }
 }
 
+/**
+ * Finish an admin sign-in: the same ID-token validation and the same pilot-list
+ * admission as the connector path, then ONE check the connector path does not make.
+ *
+ * Being on the pilot list means you may read KLIP. Administering the list means you
+ * decide who else can. Different rights, and this is where they part.
+ */
+async function completeAdminSignIn(
+  req: Request,
+  res: Response,
+  code: string,
+  trip: { codeVerifier: string; nonce: string },
+): Promise<void> {
+  const clientIp = clientIpOf(req);
+
+  let identity: hub.HubIdentity;
+  try {
+    identity = await hub.exchangeCode(code, trip.codeVerifier, trip.nonce);
+  } catch (err) {
+    const reason = err instanceof hub.HubError ? err.reason : 'unknown';
+    await audit
+      .write({
+        event: 'auth_fail',
+        ctx: { requestId: audit.newRequestId(), userId: 'unknown', clientIp },
+        outcome: `admin_hub_${reason}`,
+      })
+      .catch(() => undefined);
+    sendHtml(res, 400, renderErrorPage('Sign-in could not be verified', (err as Error).message));
+    return;
+  }
+
+  const ctx = { requestId: audit.newRequestId(), userId: identity.email, clientIp };
+
+  const admission = await admitHubIdentity(identity);
+  if (!admission.ok) {
+    await audit.write({ event: 'auth_fail', ctx, outcome: `admin_${admission.reason}` }).catch(() => undefined);
+    sendHtml(
+      res,
+      403,
+      renderNotPermittedPage(identity.email, 'Your Downstream Hub account is not on the KLIP connector pilot list.'),
+    );
+    return;
+  }
+
+  const row = await users.findByEmail(admission.user.email);
+  if (row === undefined || !row.is_admin) {
+    // WARN with the address. A pilot user finding /admin is not an attack, but it is
+    // worth seeing if it starts happening repeatedly.
+    logger.warn({ email: admission.user.email }, 'admin page refused: pilot user is not an administrator');
+    await audit.write({ event: 'auth_fail', ctx, outcome: 'admin_not_administrator' }).catch(() => undefined);
+    sendHtml(res, 403, renderNotAdminPage(admission.user.email));
+    return;
+  }
+
+  const token = await issueAdminSession(admission.user.id, admission.user.email);
+  await audit
+    .write({
+      event: 'admin_action',
+      ctx,
+      outcome: 'admin_session_issued',
+      detail: { email: admission.user.email, severity: 'high' },
+    })
+    .catch(() => undefined);
+  logger.warn({ email: admission.user.email }, 'admin session issued for the pilot-list UI');
+
+  res.cookie(ADMIN_SESSION_COOKIE, token, { ...adminCookieOptions(), maxAge: ADMIN_COOKIE_MAX_AGE_MS });
+  res.redirect(302, '/admin');
+}
+
 export function consentRouter(): Router {
   const router = Router();
 
@@ -184,6 +253,25 @@ export function consentRouter(): Router {
         400,
         renderErrorPage('Sign-in expired', 'This sign-in link is no longer valid. Please start again from the application.'),
       );
+      return;
+    }
+
+    /**
+     * The admin UI shares this callback rather than owning a second one.
+     *
+     * Two round trips land here: a connector authorization, whose pending token is a
+     * signed JWT describing Claude's request, and an admin sign-in, marked with a
+     * sentinel because there is no OAuth request to complete. A second callback would
+     * mean a second place to get ID-token validation right, and that validation is the
+     * part worth having exactly once.
+     *
+     * This branch MUST come before verifyPending: the sentinel is not a JWT, so
+     * reaching the verify would report "Authorization request expired" and send the
+     * administrator looking for a timeout that never happened. It shipped that way
+     * once - see adminCallback.spec.ts, which exists to stop it happening twice.
+     */
+    if (trip.pendingToken === ADMIN_ROUND_TRIP) {
+      await completeAdminSignIn(req, res, code, trip);
       return;
     }
 
