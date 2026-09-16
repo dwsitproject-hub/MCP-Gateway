@@ -104,8 +104,13 @@ export const jettyRoutes = {
     verifiedOn: '2026-09-11',
     observedMs: 874,
     notes:
-      'Object with a `summaries` array - live ATG moved-vs-total per alongside operation. The slowest ' +
-      'endpoint probed, and still under a second.',
+      'TWO SHAPES IN THE WILD. Production (16 Sep 2026) returns `summaries` as an OBJECT KEYED BY ' +
+      'OPERATION ID, values null where no gauge reading exists, the shipping-instruction quantity ' +
+      'spelled siQty, and no operationId inside the value. Staging (11 Sep) returned an ARRAY of rows ' +
+      'each carrying operationId and totalQty. The tool parses both: iterating the object form with ' +
+      'for...of throws "not iterable", so the mismatch failed the whole tool rather than degrading. ' +
+      'Each value also carries `connected` and `source` - PER-VESSEL gauge state, which can be false ' +
+      'while /dashboard-v2/atg-sync-health reports the port healthy.',
   },
 
   operations: {

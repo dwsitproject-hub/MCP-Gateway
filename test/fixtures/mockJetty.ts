@@ -19,10 +19,17 @@ export interface MockJettyState {
   requests: Array<{ method: string; path: string; auth: string | undefined; portHeader: string | undefined }>;
   /** Flip to exercise the stale-ATG caveat. */
   staleSources: number;
+  /**
+   * Which cargo-progress shape to return. Production sends the keyed object; staging
+   * sent an array. Both are in the wild, so both are testable.
+   */
+  cargoShape: 'object' | 'array';
+  /** Per-vessel gauge state, distinct from the port-level ATG health. */
+  gaugeConnected: boolean;
 }
 
 export function freshJettyState(): MockJettyState {
-  return { requests: [], staleSources: 0 };
+  return { requests: [], staleSources: 0, cargoShape: 'object', gaugeConnected: true };
 }
 
 /** A structurally real JWT with an 8-hour life, matching what JPS issues. */
@@ -132,7 +139,34 @@ export function createMockJetty(state: MockJettyState): Express {
 
   app.get('/api/v1/operations/at-berth/cargo-progress', (req: Request, res: Response) => {
     if (!requireBearer(req, res)) return;
-    res.json({ summaries: [{ operationId: '901', movedQty: 1470, totalQty: 3500 }] });
+    /**
+     * PRODUCTION's shape, measured 16 Sep 2026: an OBJECT keyed by operation id, with
+     * null where JPS has no gauge reading, the total spelled siQty, and no operationId
+     * inside the value. Staging returned an array of rows instead.
+     *
+     * The mock follows PRODUCTION because that is what the connector serves. The array
+     * form is covered by its own test - a mock that kept the friendlier shape would
+     * have gone on passing while the tool threw "not iterable" against the real thing,
+     * which is exactly what happened.
+     */
+    if (state.cargoShape === 'array') {
+      // Staging's shape: rows carrying their own operationId, total spelled totalQty.
+      res.json({ summaries: [{ operationId: '901', movedQty: 1470, totalQty: 3500 }] });
+      return;
+    }
+    res.json({
+      summaries: {
+        '901': {
+          connected: state.gaugeConnected,
+          source: 'ATG',
+          movedQty: 1470,
+          siQty: 3500,
+          siMetric: 'MT',
+          completionPercent: 42,
+        },
+        '902': null,
+      },
+    });
   });
 
   app.get('/api/v1/dashboard-v2/atg-sync-health', (req: Request, res: Response) => {

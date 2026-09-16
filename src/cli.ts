@@ -803,6 +803,15 @@ async function cmdJettyVerify(): Promise<void> {
     // unlike every other route, which reads the x-port-id header.
     const params: Record<string, string | number | undefined> = {};
     if (route.params.portId !== undefined) params[route.params.portId] = cfg.JETTY_PORT_ID ?? 1;
+    // The dashboard routes 200 with {error: "start_date and end_date are required"}
+    // when called bare. Probing them without dates proves nothing except that the
+    // prober forgot the dates - it read as four broken endpoints on the first run.
+    if (route.params.startDate !== undefined && route.params.endDate !== undefined) {
+      const today = new Date();
+      const weekAgo = new Date(today.getTime() - 7 * 86_400_000);
+      params[route.params.startDate] = weekAgo.toISOString().slice(0, 10);
+      params[route.params.endDate] = today.toISOString().slice(0, 10);
+    }
 
     const started = Date.now();
     try {

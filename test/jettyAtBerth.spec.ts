@@ -54,6 +54,8 @@ afterAll(async () => {
 beforeEach(() => {
   state.requests.length = 0;
   state.staleSources = 0;
+  state.cargoShape = 'object';
+  state.gaugeConnected = true;
   m.resetJettySession();
 });
 
@@ -136,6 +138,56 @@ describe('the cargo trust signal', () => {
     expect(d.atg_sync.stale_sources).toBe(2);
     expect(String(d.cargo_trust_note)).toMatch(/^2 ATG source\(s\) have not synced/);
     expect(String(d.cargo_trust_note)).toMatch(/stopped advancing while loading continued/);
+  });
+});
+
+describe('the two cargo-progress shapes', () => {
+  it('reads the PRODUCTION shape: an object keyed by operation id', async () => {
+    /**
+     * The bug this pins. Production returns { summaries: { "901": {...}, "902": null } }
+     * where staging returned an array, and `for...of` over an object throws "not
+     * iterable" - so the tool did not degrade to null cargo, it failed outright. The
+     * total is spelled siQty here and totalQty on staging.
+     */
+    const out = await run();
+    const v = (out.data as any).vessels.find((x: any) => x.vessel_name === 'MT. GIAT ARMADA 02');
+    expect(v.cargo_moved).toBe(1470);
+    expect(v.cargo_total).toBe(3500);
+    expect(v.cargo_unit).toBe('MT');
+    expect(v.gauge_connected).toBe(true);
+  });
+
+  it('still reads the STAGING shape, an array of rows', async () => {
+    // Kept working on purpose: the two environments disagree, and a connector that
+    // only parses whichever one it saw last is the thing being fixed here.
+    state.cargoShape = 'array';
+    const out = await run();
+    const v = (out.data as any).vessels.find((x: any) => x.vessel_name === 'MT. GIAT ARMADA 02');
+    expect(v.cargo_moved).toBe(1470);
+    expect(v.cargo_total).toBe(3500);
+  });
+
+  it('reports no reading, rather than zero, where JPS sends null', async () => {
+    const out = await run();
+    const eiho = (out.data as any).vessels.find((x: any) => x.vessel_name === 'EIHO');
+    expect(eiho.cargo_moved).toBeNull();
+    expect(eiho.cargo_total).toBeNull();
+    expect((out.data as any).vessels_without_a_cargo_reading).toContain('EIHO');
+  });
+
+  it('warns per vessel when ITS gauge is disconnected, even with the port healthy', async () => {
+    /**
+     * atg-sync-health is the PORT's state. A single operation can be disconnected while
+     * the port reads healthy, and then that one vessel's tonnage is frozen while every
+     * other figure on the page is live - the most misleading arrangement available.
+     */
+    state.gaugeConnected = false;
+    const out = await run();
+    const d = out.data as Record<string, any>;
+    expect(d.atg_sync.all_healthy).toBe(true);
+    expect(d.vessels_with_a_disconnected_gauge).toContain('MT. GIAT ARMADA 02');
+    expect(String(d.cargo_trust_note)).toMatch(/DISCONNECTED gauge/);
+    expect(String(d.cargo_trust_note)).toMatch(/not advancing/);
   });
 });
 

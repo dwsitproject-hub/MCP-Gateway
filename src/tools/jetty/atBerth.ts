@@ -73,11 +73,52 @@ interface AtBerthRow {
   exceptionStatus?: string;
 }
 
+/**
+ * One operation's cargo progress.
+ *
+ * TWO SHAPES, measured. Staging returned an ARRAY whose rows each carried an
+ * operationId and a totalQty. Production returns an OBJECT keyed by operation id,
+ * whose values may be null, with the total spelled siQty and no operationId inside.
+ *
+ * The array form is still accepted rather than replaced. Not politeness to staging: a
+ * `for...of` over the object form throws "not iterable", so the old code did not
+ * degrade to null cargo in production, it failed the whole tool - and a reader cannot
+ * tell which environment they are pointed at from the error.
+ */
 interface CargoSummary {
   operationId?: string | number;
   movedQty?: number;
+  /** Staging's name for the shipping-instruction quantity. */
   totalQty?: number;
+  /** Production's name for the same figure. */
+  siQty?: number;
+  siMetric?: string;
+  completionPercent?: number;
+  /** Whether THIS operation's gauge is connected - per vessel, unlike atg-sync-health. */
+  connected?: boolean;
+  /** Which gauge the figure came from, e.g. the tank or a flow meter. */
+  source?: string;
   [k: string]: unknown;
+}
+
+type CargoProgress = CargoSummary[] | Record<string, CargoSummary | null> | null | undefined;
+
+/** Index by operation id, whichever shape JPS sent. */
+function indexSummaries(raw: CargoProgress): Map<string, CargoSummary> {
+  const byOperation = new Map<string, CargoSummary>();
+  if (Array.isArray(raw)) {
+    for (const s of raw) {
+      if (s !== null && s.operationId !== undefined) byOperation.set(String(s.operationId), s);
+    }
+  } else if (raw !== null && raw !== undefined && typeof raw === 'object') {
+    // A null value means JPS has no gauge reading for that operation. Skipped, so the
+    // vessel reports no cargo figure rather than a zero - the distinction this whole
+    // connector rests on.
+    for (const [operationId, s] of Object.entries(raw)) {
+      if (s !== null && typeof s === 'object') byOperation.set(operationId, s);
+    }
+  }
+  return byOperation;
 }
 
 interface AtgHealth {
@@ -142,15 +183,12 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
     // with no idea how old it is.
     const [rows, progress, health] = await Promise.all([
       jettyGet<AtBerthRow[]>(jettyRoutes.atBerth.path, {}, calls),
-      jettyGet<{ summaries?: CargoSummary[] }>(jettyRoutes.atBerthCargoProgress.path, {}, calls),
+      jettyGet<{ summaries?: CargoProgress }>(jettyRoutes.atBerthCargoProgress.path, {}, calls),
       jettyGet<AtgHealth>(jettyRoutes.atgSyncHealth.path, {}, calls),
     ]);
 
     const all = Array.isArray(rows) ? rows : [];
-    const summaries = new Map<string, CargoSummary>();
-    for (const s of progress?.summaries ?? []) {
-      if (s.operationId !== undefined) summaries.set(String(s.operationId), s);
-    }
+    const summaries = indexSummaries(progress?.summaries);
 
     const matched = all.filter(
       (r) => loosely(r.vesselName, params.vessel_name) && loosely(r.jettyName, params.jetty_name),
@@ -174,7 +212,15 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
         si_quantity: r.cargoSiQty ?? null,
         si_quantity_unit: r.cargoSiMetricCode ?? null,
         cargo_moved: cargo?.movedQty ?? null,
-        cargo_total: cargo?.totalQty ?? null,
+        // siQty in production, totalQty on staging - the same shipping-instruction
+        // quantity under two names.
+        cargo_total: cargo?.totalQty ?? cargo?.siQty ?? null,
+        cargo_unit: cargo?.siMetric ?? null,
+        // Per-vessel gauge state. atg_sync below is the PORT's health; this row can be
+        // disconnected while the port reads healthy, and then this vessel's tonnage is
+        // stale while every other one is current.
+        gauge_connected: cargo?.connected ?? null,
+        gauge_source: cargo?.source ?? null,
         completion_percent: r.completionPercent ?? null,
         // The ladder, reported as JPS holds it. Nulls are unrecorded, not zero.
         eta: toWibIso(r.eta ?? null),
@@ -192,6 +238,8 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
     });
 
     const stale = Number(health?.staleCount ?? 0);
+    const disconnected = vessels.filter((v) => v.gauge_connected === false).map((v) => v.vessel_name);
+    const noReading = vessels.filter((v) => v.cargo_moved === null).map((v) => v.vessel_name);
     const data: Record<string, unknown> = {
       vessels,
       vessels_alongside: all.length,
@@ -202,8 +250,15 @@ export const jettyAtBerth: ToolDefinition<typeof inputShape> = {
         all_healthy: health?.allHealthy ?? null,
         checked_at: toWibIso(health?.checkedAt ?? null),
       },
+      vessels_without_a_cargo_reading: noReading,
+      vessels_with_a_disconnected_gauge: disconnected,
       cargo_trust_note:
-        stale > 0
+        disconnected.length > 0
+          ? `${disconnected.join(', ')} ${disconnected.length === 1 ? 'has' : 'have'} a DISCONNECTED gauge, ` +
+            'so the cargo figure shown is the last one recorded and is not advancing. The port-level ATG ' +
+            'health below can read healthy while an individual vessel is disconnected - it is a different ' +
+            'measurement. Quote tonnage for those vessels only with that caveat.'
+          : stale > 0
           ? `${stale} ATG source(s) have not synced within the last hour, so cargo_moved may have ` +
             'stopped advancing while loading continued. Quote tonnage from this result with that ' +
             'caveat, or check the JPS Tank Farm page before reporting it.'
