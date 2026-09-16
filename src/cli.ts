@@ -25,6 +25,7 @@
  *   audit:summary [--days N]       per-tool usage, error and truncation rates
  *   routes:verify                  probe KLIP and report the Appendix A gaps
  *   routes:verify-fields           check every MAPPED field against a live row
+ *   jetty:verify                   the same probe for the Jetty Planning System
  */
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
@@ -38,6 +39,9 @@ import * as hub from './auth/hub.js';
 import { revokeAll, revokeUser } from './auth/tokens.js';
 import * as audit from './core/audit.js';
 import { routes, verificationGaps, type RouteContract } from './adapters/klip/routes.js';
+import { jettyRoutes, type JettyRoute } from './adapters/jetty/routes.js';
+import { jettyGet } from './adapters/jetty/session.js';
+import { jettyConfigured } from './adapters/jetty/client.js';
 import { fields } from './adapters/klip/fields.js';
 import { authorizedGet } from './adapters/klip/session.js';
 import { extractRows, TOTAL_PAGES_ALTERNATES } from './adapters/klip/paginate.js';
@@ -758,6 +762,103 @@ async function cmdRoutesVerifyFields(): Promise<void> {
   }
 }
 
+/**
+ * Fields jetty_at_berth reads off every row.
+ *
+ * Duplicated from the handler's AtBerthRow rather than derived, because the handler
+ * reads them by property access and there is no map to introspect. The duplication is
+ * the point of the command: if JPS production drops or renames one, this says so, and
+ * the tool would otherwise report a silent null - which for a milestone timestamp reads
+ * as "the event did not happen".
+ */
+const AT_BERTH_FIELDS = [
+  'id', 'vesselName', 'jettyName', 'purpose', 'status', 'jettyOperationCode', 'referenceNumber',
+  'commodityDisplay', 'cargoSiQty', 'cargoSiMetricCode', 'completionPercent', 'eta', 'ta', 'etb',
+  'tbAt', 'norTenderedAt', 'norAcceptedAt', 'demurrageLiabilityFromAt', 'estimatedCompletionTime',
+  'operationsCompletedAt', 'exceptionStatus',
+] as const;
+
+/**
+ * Probe the Jetty Planning System the way routes:verify-fields probes KLIP.
+ *
+ * JPS had no equivalent gate, which is a gap rather than a decision: its route map was
+ * measured against STAGING on 11 Sep 2026, and moving the connector to production
+ * reuses those contracts against a different deployment with no check at all. Switching
+ * KLIP over found a field map that matched nothing and reported every payment as unpaid
+ * without erroring once. There is no reason JPS is immune to the same thing.
+ */
+async function cmdJettyVerify(): Promise<void> {
+  if (!jettyConfigured()) {
+    out('JPS is not configured: set JETTY_BASE_URL, JETTY_SVC_USER, JETTY_SVC_PASS and JETTY_PORT_ID.');
+    return;
+  }
+  out(`Probing ${cfg.JETTY_BASE_URL ?? ''} (JETTY_ENV=${cfg.JETTY_ENV ?? `unset, falling back to ${cfg.KLIP_ENV}`})`);
+  out(`Port scope: x-port-id ${String(cfg.JETTY_PORT_ID ?? '(unset)')}\n`);
+
+  const all = jettyRoutes as unknown as Record<string, JettyRoute>;
+  let atBerthRows: Array<Record<string, unknown>> = [];
+
+  for (const [name, route] of Object.entries(all)) {
+    // /tank-gauging/latest takes the port as a QUERY parameter and 400s without it,
+    // unlike every other route, which reads the x-port-id header.
+    const params: Record<string, string | number | undefined> = {};
+    if (route.params.portId !== undefined) params[route.params.portId] = cfg.JETTY_PORT_ID ?? 1;
+
+    const started = Date.now();
+    try {
+      const body = await jettyGet<unknown>(route.path, params);
+      const ms = Date.now() - started;
+
+      let rows: Array<Record<string, unknown>> = [];
+      let shape: string;
+      if (route.rowsPath === null) {
+        shape = body === null || typeof body !== 'object' ? String(body) : `object{${Object.keys(body).length} keys}`;
+      } else if (route.rowsPath === '') {
+        rows = Array.isArray(body) ? (body as Array<Record<string, unknown>>) : [];
+        shape = Array.isArray(body) ? `array(${rows.length})` : `NOT AN ARRAY - ${typeof body}`;
+      } else {
+        const at = (body as Record<string, unknown> | null)?.[route.rowsPath];
+        rows = Array.isArray(at) ? (at as Array<Record<string, unknown>>) : [];
+        shape = Array.isArray(at) ? `${route.rowsPath}(${rows.length})` : `NO ARRAY AT '${route.rowsPath}'`;
+      }
+
+      // Drift in the wrong direction is worth naming: staging timings are recorded on
+      // each route so a production endpoint that is an order of magnitude slower shows
+      // up here rather than as a timeout in someone's chat.
+      const slow = ms > route.observedMs * 4 && ms > 1000 ? `  <-- ${String(route.observedMs)} ms on staging` : '';
+      out(`${name.padEnd(22)} OK    ${String(ms).padStart(5)} ms  ${shape}${slow}`);
+      if (name === 'atBerth') atBerthRows = rows;
+    } catch (err) {
+      out(`${name.padEnd(22)} FAIL  ${(err as Error).message}`);
+    }
+  }
+
+  out('');
+  if (atBerthRows.length === 0) {
+    out('jetty_at_berth: no vessels alongside, so its field map is UNPROVEN against this environment.');
+    out('Re-run when a vessel is at a berth - an empty board proves the route, never the row.');
+  } else {
+    const absent: string[] = [];
+    const sparse: Array<[string, number]> = [];
+    for (const field of AT_BERTH_FIELDS) {
+      const hits = atBerthRows.filter((r) => field in r).length;
+      if (hits === 0) absent.push(field);
+      else if (hits < atBerthRows.length) sparse.push([field, hits]);
+    }
+    out(`jetty_at_berth fields over ${atBerthRows.length} row(s): ${AT_BERTH_FIELDS.length - absent.length}/${AT_BERTH_FIELDS.length} present`);
+    for (const f of absent) out(`  ABSENT ${f} - jetty_at_berth would report null, which reads as "did not happen"`);
+    for (const [f, n] of sparse) out(`  sparse ${f} on ${n}/${atBerthRows.length} rows (omitted when null)`);
+    if (absent.length === 0 && sparse.length === 0) out('  every field present on every row');
+    const keys = new Set<string>();
+    for (const r of atBerthRows) for (const k of Object.keys(r)) keys.add(k);
+    out(`  row carries ${keys.size} keys in total`);
+  }
+
+  out('');
+  out('Record the date in src/adapters/jetty/routes.ts (verifiedOn) once this reads clean against');
+  out('production. Unlike KLIP there is no boot gate on it, so nothing else will remind you.');
+}
+
 // ---------------------------------------------------------------------------
 // dispatch
 // ---------------------------------------------------------------------------
@@ -777,6 +878,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   'audit:export': cmdAuditExport,
   'audit:summary': cmdAuditSummary,
   'routes:verify': async () => cmdRoutesVerify(),
+  'jetty:verify': async () => cmdJettyVerify(),
   'routes:verify-fields': async () => cmdRoutesVerifyFields(),
   'hub:check': async () => cmdHubCheck(),
   migrate: async () => {
