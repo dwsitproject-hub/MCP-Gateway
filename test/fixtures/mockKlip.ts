@@ -55,6 +55,10 @@ export interface MockContract {
   quantity_receive: string | null;
   contract_date: string;
   remarks: string;
+  /** Optional so the awkward-case rows below need not restate them. */
+  unit_price?: number;
+  currency?: string;
+  contract_value?: number;
 }
 
 /** 250 contracts: enough to force pagination at a clamped limit of 100. */
@@ -78,6 +82,17 @@ export function buildContracts(): MockContract[] {
       quantity_receive: '300000' + i * 500,
       contract_date: `2026-0${(i % 8) + 1}-1${i % 9}`,
       remarks: `Routine shipment note ${i}.`,
+      /**
+       * PRICE. unit_price is PER KILOGRAM and quantity_ordered is kilograms, so
+       * contract_value is their product - which is exactly how klip_price_summary works
+       * the basis out rather than assuming it. Every twelfth contract is priced in US$
+       * at a per-kg figure three orders smaller, because production carries IDR and US$
+       * together and averaging across them would not be a price.
+       */
+      unit_price: i % 12 === 0 ? 0.92 : 14_000 + (i % 40) * 50,
+      currency: i % 12 === 0 ? 'US$' : 'IDR',
+      contract_value:
+        (i % 12 === 0 ? 0.92 : 14_000 + (i % 40) * 50) * Number('1000000' + String(i * 1000)),
     });
   }
 

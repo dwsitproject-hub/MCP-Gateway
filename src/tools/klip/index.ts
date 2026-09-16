@@ -18,6 +18,7 @@ import { shippingPerformance } from './shippingPerformance.js';
 import { reference } from './reference.js';
 import { sapImportStatus } from './sapImportStatus.js';
 import { searchContracts } from './searchContracts.js';
+import { priceSummary } from './priceSummary.js';
 import { shipmentStatus } from './shipmentStatus.js';
 import { truckingOps } from './truckingOps.js';
 
@@ -25,6 +26,7 @@ import { truckingOps } from './truckingOps.js';
 export const klipTools: ReadonlyArray<ToolDefinition<any>> = [
   // The eight from PRD Section 8...
   searchContracts,
+  priceSummary,
   getContract,
   outstanding,
   shipmentStatus,

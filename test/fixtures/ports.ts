@@ -34,4 +34,5 @@ export const PORTS = {
   adminUi: 5205,
   adminCallback: 5206,
   jettyTankFarm: 5207,
+  priceSummary: 5208,
 } as const;
