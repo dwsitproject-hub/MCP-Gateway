@@ -230,15 +230,39 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
         delivery_end_date: deliveryEnd,
         days_past_delivery_end: daysPast(deliveryEnd, asOf),
         // The ladder, named for the milestone each date belongs to.
+        /**
+         * THE FULL LADDER, both ports, estimate and actual - nine rungs each, matching
+         * the Estimation and ATA sections of KLIP's Edit Shipment dialog exactly.
+         *
+         * Eight of these were mapped in fields.shipment and never emitted: BERTHED and
+         * START at each port. So the connector held ATB and ATS for every row and
+         * answered "no berthing information" when asked, while the KLIP page showed
+         * them - the same gap as unit_price and the tank farm, where the connector's
+         * omission was reported as the upstream's.
+         *
+         * They matter more than the count suggests. Arrival to berthed is waiting for a
+         * berth; berthed to start is waiting to begin pumping; start to complete is the
+         * operation itself. Collapsing them into arrival-and-complete makes a vessel
+         * that waited three days at anchor indistinguishable from one that worked
+         * slowly alongside, and those have different causes and different owners.
+         */
         eta_loading_arrival: toDateOnly(pickString(row, f.etaLoadArrival)),
+        eta_loading_berthed: toDateOnly(pickString(row, f.etaLoadBerthed)),
+        eta_loading_start: toDateOnly(pickString(row, f.etaLoadStart)),
         eta_loading_complete: toDateOnly(pickString(row, f.etaLoadComplete)),
         eta_sailed_from_loading: toDateOnly(pickString(row, f.etaSailed)),
         eta_discharge_arrival: toDateOnly(pickString(row, f.etaDischArrival)),
+        eta_discharge_berthed: toDateOnly(pickString(row, f.etaDischBerthed)),
+        eta_discharge_start: toDateOnly(pickString(row, f.etaDischStart)),
         eta_discharge_complete: toDateOnly(pickString(row, f.etaDischComplete)),
         ata_loading_arrival: toDateOnly(pickString(row, f.ataLoadArrival)),
+        ata_loading_berthed: toDateOnly(pickString(row, f.ataLoadBerthed)),
+        ata_loading_start: toDateOnly(pickString(row, f.ataLoadStart)),
         ata_loading_complete: toDateOnly(pickString(row, f.ataLoadComplete)),
         ata_sailed_from_loading: toDateOnly(pickString(row, f.ataSailed)),
         ata_discharge_arrival: toDateOnly(pickString(row, f.ataDischArrival)),
+        ata_discharge_berthed: toDateOnly(pickString(row, f.ataDischBerthed)),
+        ata_discharge_start: toDateOnly(pickString(row, f.ataDischStart)),
         ata_discharge_complete: toDateOnly(pickString(row, f.ataDischComplete)),
         shipped_qty_mt: kgToMt(pickNumber(row, f.qty)),
         // contract_qty_mt and outstanding_qty_mt are the CONTRACT's figures, repeated
@@ -371,11 +395,18 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
       'KLIP\'s own aggregate.';
 
     data.milestone_note =
-      'Milestones form a ladder with an estimate and an actual at each rung: arrival at the LOADING port, ' +
-      'berthing, loading complete, sailing, then arrival, berthing and completion at the discharge port. ' +
+      'NINE RUNGS PER PORT, each with an estimate (eta_) and an actual (ata_), matching the Estimation ' +
+      'and ATA sections of the KLIP Edit Shipment dialog: at the LOADING port arrival, berthed, start, ' +
+      'complete, then sailed; at the DISCHARGE port arrival, berthed, start, complete. ' +
+      'The three intervals mean different things and have different owners: arrival to berthed is ' +
+      'WAITING FOR A BERTH, berthed to start is waiting to begin pumping, and start to complete is the ' +
+      'operation itself. Quoting only arrival and complete makes a vessel that sat three days at anchor ' +
+      'look the same as one that worked slowly alongside. ' +
       'eta_loading_arrival preceding eta_sailed_from_loading is correct and expected - both belong to the ' +
-      'loading call. A null actual means the milestone is unrecorded in KLIP, which is not the same as ' +
-      'the event not having happened.';
+      'loading call, and it is not an ETA/ETD pair. ' +
+      'A null actual means the milestone is unrecorded in KLIP, which is NOT the same as the event not ' +
+      'having happened - KLIP leaves rungs blank routinely, and the Edit Shipment dialog shows the same ' +
+      'blanks.';
     data.not_available =
       'sla_days, sfal_qty and sfbd_qty are empty on every row in KLIP staging, and is_delayed is false on ' +
       'every row even where the page marks the shipment Late - so is_delayed is not the page\'s late ' +
