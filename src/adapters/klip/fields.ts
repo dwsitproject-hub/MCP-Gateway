@@ -102,10 +102,16 @@ export const fields = {
      * exposed by the API" about a field KLIP had been returning the whole time. The
      * page showed it and the tool could not.
      *
-     * THE BASIS IS NOT STATED. Quantities on this endpoint are KILOGRAMS behind a unit
-     * field that says MT, so whether unit_price is per kg or per MT cannot be read off
-     * the payload, and the two answers differ by 1000x. Nothing here multiplies:
-     * contract_value is KLIP's own total and is reported instead.
+     * THE BASIS IS PER KILOGRAM, confirmed from the KLIP source on 22 Sep 2026.
+     * sapDataDistribution.service.ts computes contract_value as
+     * quantity_ordered * unit_price, and quantity_ordered is kilograms - so the price
+     * is per kilogram. KLIP's own dashboards divide contract_value by quantity to get
+     * an average unit price, on the same basis.
+     *
+     * Nothing here multiplies anyway: contract_value is KLIP's own total and is
+     * reported instead. klip_price_summary still MEASURES the basis from live rows
+     * rather than trusting this note, so a change upstream shows up as a disagreement
+     * instead of as a silent thousandfold error.
      */
     unitPrice: ['unit_price', 'unitPrice', 'harga_satuan'],
     contractValue: ['contract_value', 'contractValue', 'nilai_kontrak'],

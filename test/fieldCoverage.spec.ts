@@ -64,11 +64,6 @@ const DELIBERATELY_UNSURFACED: Record<string, string> = {
     'Empty on every row in KLIP. Reported as not_available rather than as a null quantity, because a ' +
     'null loss figure reads as no loss.',
 
-  'shipment.outstandingQtyPlanning':
-    'A SECOND outstanding column whose relationship to outstanding_quantity is unconfirmed. Publishing ' +
-    'two outstanding figures without knowing which is authoritative invites the reader to pick the one ' +
-    'that suits, which is exactly the failure this connector removes elsewhere. Open with KLIP.',
-
   'oilLoss.id': 'KLIP internal row id. operation_id and the contract/STO numbers are reported instead.',
   'oilLoss.sfal':
     'Empty on every row in KLIP, like its shipment counterpart. Reported as absent rather than as a null ' +

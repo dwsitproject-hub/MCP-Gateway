@@ -251,6 +251,22 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
          * lading quantity is what the document says - the gaps between them are the loss
          * question. Reporting only one made that question unanswerable from this tool.
          */
+        /**
+         * NOT a second opinion on outstanding_qty_mt - a different question, settled
+         * from the KLIP source on 22 Sep 2026.
+         *
+         *   outstanding_qty_mt        contract MINUS what has been delivered or
+         *                             received, on the incoterm basis. How much is
+         *                             still owed.
+         *   unplanned_qty_mt          contract MINUS what has been assigned to STOs,
+         *                             as GREATEST(contract - sap_sto - assigned, 0).
+         *                             How much has not been put on a shipment yet.
+         *
+         * A contract can be fully planned and barely delivered, or the reverse. Note
+         * KLIP CLAMPS this one at zero, unlike the actual outstanding, where a negative
+         * is a real over-delivery and is reported as such.
+         */
+        unplanned_qty_mt: kgToMt(pickNumber(row, f.outstandingQtyPlanning)),
         delivered_qty_mt: kgToMt(pickNumber(row, f.qtyDelivered)),
         received_qty_mt: kgToMt(pickNumber(row, f.qtyReceived)),
         bl_qty_mt: kgToMt(pickNumber(row, f.blQuantity)),
