@@ -8,6 +8,7 @@
  */
 import { z } from 'zod';
 import * as knowledge from './../../core/knowledge.js';
+import * as gaps from './../../core/gaps.js';
 import type { ToolDefinition, ToolOutcome, ToolContext } from './../klip/types.js';
 
 const inputShape = {
@@ -40,12 +41,32 @@ export const knowledgeSearch: ToolDefinition<typeof inputShape> = {
     'READ-ONLY: this tool only reads the gateway knowledge base; it reads nothing from KLIP and writes nothing anywhere.',
   inputShape,
   cap: 25,
-  handler: async (params, _ctx: ToolContext): Promise<ToolOutcome> => {
+  handler: async (params, ctx: ToolContext): Promise<ToolOutcome> => {
     const { hits, match } = await knowledge.search(params.query, {
       topic: params.topic,
       includeDeprecated: params.include_deprecated,
       limit: params.limit,
     });
+
+    /**
+     * A search that finds NOTHING is the cheapest gap signal the gateway has, and the
+     * only one it can collect without being told. Someone looked for an explanation the
+     * knowledge base does not hold - which is either a fact worth writing down or a
+     * capability worth building, and both belong on the list.
+     *
+     * Only the empty case. A weak match still returned something to read, and recording
+     * those would bury the real gaps under near-misses.
+     */
+    if (hits.length === 0) {
+      void gaps.record({
+        topic: params.query,
+        question: params.query,
+        system: 'gateway',
+        reason: 'no_knowledge',
+        tool: 'klip_knowledge_search',
+        userId: ctx.userId,
+      });
+    }
     return {
       data: {
         entries: hits.map((h) => ({

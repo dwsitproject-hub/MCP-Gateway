@@ -277,10 +277,24 @@ describe('instructions block', () => {
 
 describe('tool surface', () => {
   it('knowledge write tools declare readOnly: false; search stays read-only', () => {
+    /**
+     * The list is exhaustive on purpose. Every tool that can write anything is named
+     * here, so adding one is a deliberate edit to this test rather than a line that
+     * slips in unnoticed - which is the only way the write boundary stays a boundary.
+     *
+     * klip_report_gap joined it on 22 Sep 2026. Like the other two it writes to the
+     * gateway's OWN store and never to KLIP or JPS.
+     */
     const byName = new Map(knowledgeTools.map((t) => [t.name, t]));
-    expect([...byName.keys()].sort()).toEqual(['klip_knowledge_feedback', 'klip_knowledge_save', 'klip_knowledge_search']);
+    expect([...byName.keys()].sort()).toEqual([
+      'klip_knowledge_feedback',
+      'klip_knowledge_save',
+      'klip_knowledge_search',
+      'klip_report_gap',
+    ]);
     expect(byName.get('klip_knowledge_save')?.readOnly).toBe(false);
     expect(byName.get('klip_knowledge_feedback')?.readOnly).toBe(false);
+    expect(byName.get('klip_report_gap')?.readOnly).toBe(false);
     expect(byName.get('klip_knowledge_search')?.readOnly).toBeUndefined();
   });
 

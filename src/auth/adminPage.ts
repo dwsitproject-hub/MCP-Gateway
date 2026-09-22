@@ -11,6 +11,7 @@
  */
 import { escapeHtml } from './loginPage.js';
 import type { PilotRow } from './users.js';
+import type { RankedGap } from './../core/gaps.js';
 import { cfg } from './../core/config.js';
 
 const STYLE = `
@@ -85,6 +86,8 @@ function shell(title: string, body: string): string {
 }
 
 export interface AdminPageOptions {
+  /** What the connector was asked for and could not answer, most asked first. */
+  gaps: RankedGap[];
   signedInAs: string;
   csrf: string;
   pilots: PilotRow[];
@@ -127,6 +130,30 @@ function row(p: PilotRow, csrf: string, signedInAs: string): string {
   </tr>`;
 }
 
+/** One gap, with up to three of the questions that produced it. */
+function gapRow(g: RankedGap, csrf: string): string {
+  const when = (d: Date | string): string => String(d).slice(0, 10);
+  // The questions are the point of the panel. A topic slug says someone wanted
+  // something about tanks; the question says what they were trying to decide.
+  const questions =
+    g.questions.length === 0
+      ? ''
+      : `<br>${g.questions
+          .map((q) => `<span class="foot">&ldquo;${escapeHtml(q)}&rdquo;</span>`)
+          .join('<br>')}`;
+  return `<tr>
+    <td><strong>${escapeHtml(g.slug)}</strong>${questions}</td>
+    <td>${String(g.times_asked)}</td>
+    <td>${escapeHtml(when(g.last_seen))}</td>
+    <td>${g.systems.map((s) => `<span class="tag hub">${escapeHtml(s)}</span>`).join(' ')}</td>
+    <td><form class="row" method="post" action="/admin/gaps/resolve">
+      <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
+      <input type="hidden" name="slug" value="${escapeHtml(g.slug)}">
+      <button class="small">Resolve</button>
+    </form></td>
+  </tr>`;
+}
+
 export function renderAdminPage(opts: AdminPageOptions): string {
   const hubUsers = opts.pilots.filter((p) => !p.isBreakGlass && !p.disabled).length;
   const atCap = hubUsers >= opts.pilotCap;
@@ -147,6 +174,23 @@ export function renderAdminPage(opts: AdminPageOptions): string {
         <thead><tr><th>Account</th><th>Sign-in</th><th>State</th><th>Hub linked</th><th></th></tr></thead>
         <tbody>${opts.pilots.map((p) => row(p, opts.csrf, opts.signedInAs)).join('')}</tbody>
       </table>
+    </div>
+
+    <div class="card">
+      <h2>What the connector could not answer</h2>
+      <p class="sub">Recorded automatically when a tool reports it cannot reach something, or when a
+         knowledge search finds nothing. Most asked first. This is the list to build from.</p>
+      ${
+        opts.gaps.length === 0
+          ? '<p class="foot">Nothing logged yet. Entries appear here as people hit limits.</p>'
+          : `<table>
+              <thead><tr><th>Topic</th><th>Asked</th><th>Last</th><th>Where</th><th></th></tr></thead>
+              <tbody>${opts.gaps.map((g) => gapRow(g, opts.csrf)).join('')}</tbody>
+            </table>`
+      }
+      <p class="warn"><strong>Question text is stored.</strong> It is what makes a gap actionable - a count
+         with no wording cannot be built from. It is deleted when you resolve the gap, and after 90 days
+         either way. Resolving keeps the count and drops the questions.</p>
     </div>
 
     <div class="card">

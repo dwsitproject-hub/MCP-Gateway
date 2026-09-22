@@ -21,6 +21,7 @@ import { assertVerified, verificationGaps } from './adapters/klip/routes.js';
 import { pruneExpired } from './auth/tokens.js';
 import { pruneState as pruneHubState, probe as hubProbe } from './auth/hub.js';
 import { purgeExpired } from './core/cache.js';
+import { forgetOldQuestions as forgetOldGapQuestions } from './core/gaps.js';
 import { SERVER_INFO } from './mcp/server.js';
 import { toolNames } from './tools/klip/index.js';
 import { knowledgeTools } from './tools/knowledge/index.js';
@@ -96,6 +97,13 @@ async function main(): Promise<void> {
     purgeExpired();
     void pruneExpired().catch((err: Error) => logger.warn({ err: err.message }, 'token pruning failed'));
     void pruneHubState().catch((err: Error) => logger.warn({ err: err.message }, 'hub state pruning failed'));
+    // The half of the gap-log privacy promise that has to run on its own. Counts are
+    // kept forever; the question WORDING is cleared at 90 days whether or not anyone
+    // has looked at the panel, because a promise that depends on someone tidying up is
+    // not a retention policy.
+    void forgetOldGapQuestions().catch((err: Error) =>
+      logger.warn({ err: err.message }, 'gap question retention sweep failed'),
+    );
   }, HOUSEKEEPING_INTERVAL_MS);
 
   const shutdown = (signal: string): void => {

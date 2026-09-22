@@ -22,6 +22,7 @@ import { Router, type Request, type Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import * as hub from './../auth/hub.js';
 import * as users from './../auth/users.js';
+import * as gaps from './../core/gaps.js';
 import { revokeUser } from './../auth/tokens.js';
 import * as audit from './../core/audit.js';
 import { cfg } from './../core/config.js';
@@ -110,6 +111,7 @@ export function adminRouter(): Router {
         signedInAs: session.email,
         csrf: session.csrf,
         pilots: await users.listPilots(),
+        gaps: await gaps.topGaps(),
         pilotCap: PILOT_CAP,
         ...opts,
       }),
@@ -209,6 +211,35 @@ export function adminRouter(): Router {
       }
     });
   }
+
+  /**
+   * Close a gap. Keeps the count, drops the questions - the retention promise the panel
+   * makes, applied at the moment it is claimed rather than left to a sweep.
+   */
+  router.post('/admin/gaps/resolve', async (req: Request, res: Response) => {
+    const session = await requirePost(req, res);
+    if (session === undefined) return;
+
+    const slug = typeof req.body?.slug === 'string' ? req.body.slug.trim() : '';
+    if (slug === '') {
+      await page(res, session, { error: 'No gap named.' });
+      return;
+    }
+    const closed = await gaps.resolve(slug, session.email, 'resolved from the admin page');
+    await audit.write({
+      event: 'admin_action',
+      ctx: { requestId: audit.newRequestId(), userId: session.email, clientIp: clientIpOf(req) },
+      outcome: 'capability_gap_resolved',
+      detail: { slug, rows: closed, by: session.email },
+    });
+    await page(res, session, {
+      notice:
+        closed === 0
+          ? `No open entries under "${slug}".`
+          : `Resolved "${slug}" - ${String(closed)} entr${closed === 1 ? 'y' : 'ies'} closed and their ` +
+            'question text deleted. The count is kept.',
+    });
+  });
 
   router.post('/admin/logout', async (req: Request, res: Response) => {
     const session = await readAdminSession(req.cookies?.[ADMIN_SESSION_COOKIE] as string | undefined);

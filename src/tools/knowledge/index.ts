@@ -14,6 +14,12 @@ import type { ToolDefinition, InputShape } from './../klip/types.js';
 import { knowledgeSearch } from './search.js';
 import { knowledgeSave } from './save.js';
 import { knowledgeFeedback } from './feedback.js';
+import { reportGap } from './reportGap.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous input shapes
-export const knowledgeTools: ReadonlyArray<ToolDefinition<any>> = [knowledgeSearch, knowledgeSave, knowledgeFeedback];
+export const knowledgeTools: ReadonlyArray<ToolDefinition<any>> = [
+  knowledgeSearch,
+  knowledgeSave,
+  knowledgeFeedback,
+  reportGap,
+];
