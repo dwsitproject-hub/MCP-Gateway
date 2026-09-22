@@ -64,8 +64,16 @@ function mapRow(row: Row): Record<string, unknown> {
     sto_number: pickString(row, f.stoNumber),
     po_number: pickString(row, f.poNumber),
     supplier: pickString(row, f.supplier),
+    buyer: pickString(row, f.buyer),
     product: pickString(row, f.product),
     plant: pickString(row, f.plant),
+    // Mapped since this tool was written and never emitted. A loss figure without the
+    // vessel, the incoterm or the contracted quantity cannot be chased: you know
+    // something went missing and not on whose leg, under whose terms, or against what.
+    vessel_name: pickString(row, f.vesselName),
+    incoterm: pickString(row, f.incoterm),
+    contract_date: toDateOnly(pickString(row, f.contractDate)),
+    quantity_contract: pickNumber(row, f.quantityContract),
     transport_mode: pickString(row, f.transportMode),
     transporter: pickString(row, f.transporter),
     loading_location: pickString(row, f.loadingLocation),

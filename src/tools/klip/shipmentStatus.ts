@@ -218,17 +218,42 @@ export const shipmentStatus: ToolDefinition<typeof inputShape> = {
       return {
         sto_number: pickString(row, f.stoNumber),
         contract_number: pickString(row, f.contractId),
+        po_number: pickString(row, f.poNumber),
+        /**
+         * THE BEST JOIN CANDIDATE BETWEEN KLIP AND JPS, and it was mapped and never
+         * emitted. JPS shipment plans carry a voyageNo of their own - populated on 11 of
+         * 85 plans when measured on 11 Sep 2026 - so where both sides have it this is an
+         * actual identifier rather than the vessel-name guessing jetty_vessel_crosscheck
+         * has to fall back on. Surfaced so the coverage on each side can be measured
+         * instead of assumed.
+         */
+        voyage_no: pickString(row, f.voyageNo),
         vessel_name: pickString(row, f.vesselName),
+        charter_type: pickString(row, f.charterType),
         status: pickString(row, f.status),
         plant: pickString(row, f.plant),
+        group_plant: pickString(row, f.groupName),
         supplier: pickString(row, f.supplier),
+        buyer: pickString(row, f.buyer),
         product: pickString(row, f.product),
         incoterm: pickString(row, f.incoterm),
+        source_type: pickString(row, f.sourceType),
         loading_port: pickString(row, f.loadingPort),
         discharge_port: pickString(row, f.dischargePort),
+        contract_date: toDateOnly(pickString(row, f.contractDate)),
         delivery_start_date: toDateOnly(pickString(row, f.deliveryStartDate)),
         delivery_end_date: deliveryEnd,
         days_past_delivery_end: daysPast(deliveryEnd, asOf),
+        /**
+         * Three more quantities KLIP holds on the row, all previously mapped and
+         * dropped. They are NOT the same figure under different names: delivered is
+         * dispatched from origin, received is weighed in at destination, and the bill of
+         * lading quantity is what the document says - the gaps between them are the loss
+         * question. Reporting only one made that question unanswerable from this tool.
+         */
+        delivered_qty_mt: kgToMt(pickNumber(row, f.qtyDelivered)),
+        received_qty_mt: kgToMt(pickNumber(row, f.qtyReceived)),
+        bl_qty_mt: kgToMt(pickNumber(row, f.blQuantity)),
         // The ladder, named for the milestone each date belongs to.
         /**
          * THE FULL LADDER, both ports, estimate and actual - nine rungs each, matching

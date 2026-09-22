@@ -85,9 +85,33 @@ function mapRow(row: Row, f: typeof fields.shippingPerformance): Record<string, 
     loading_port: pickString(row, f.loadingPort),
     discharge_port: pickString(row, f.dischargePort),
     plant: pickString(row, f.plant),
+    group_plant: pickString(row, f.groupName),
+    charter_type: pickString(row, f.charterType),
+    source_type: pickString(row, f.sourceType),
     transport_mode: pickString(row, f.transportMode),
     contract_qty_mt: kgToMt(pickNumber(row, f.contractQty)),
+    sto_qty_mt: kgToMt(pickNumber(row, f.stoQty)),
+    delivered_qty_mt: kgToMt(pickNumber(row, f.deliveredQty)),
+    received_qty_mt: kgToMt(pickNumber(row, f.receivedQty)),
     outstanding_qty_mt: kgToMt(pickNumber(row, f.outstandingQty)),
+    // The gap between what was delivered and what was received on this voyage. Mapped
+    // and never emitted, which left this tool reporting how LATE a shipment was while
+    // silently holding how much of it failed to arrive.
+    shortage_mt: kgToMt(pickNumber(row, f.shortage)),
+    /**
+     * FOUR OPERATIONAL METRICS, mapped since this tool was written and never emitted.
+     * They are the causes behind the deltas below: a slow pump rate explains a long
+     * berth-to-complete, a low sailing speed explains a late arrival, and freight and
+     * fuel are what the delay costs. Reporting the delay without them gives the symptom
+     * and withholds the diagnosis - and this is the page people open to ask WHY.
+     *
+     * KLIP's own figures. Units are not stated on the endpoint, so none is asserted
+     * here; the field names carry what KLIP calls them.
+     */
+    pump_rate: pickNumber(row, f.pumpRate),
+    sailing_speed: pickNumber(row, f.sailingSpeed),
+    freight: pickNumber(row, f.freight),
+    fuel_consumption: pickNumber(row, f.fuelConsumption),
     cargo_readiness_date: toDateOnly(pickString(row, f.cargoReadiness)),
     // The delta family that applies to THIS row's cohort. Signed: negative means the
     // event happened before the estimate.
