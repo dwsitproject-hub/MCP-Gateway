@@ -76,6 +76,8 @@ export interface JettyRoute {
     signoffRequested?: string;
     /** Only /tank-gauging/latest: port arrives as a query param, not the header. */
     portId?: string;
+    /** Only /operations: a lower bound on the cast-off, filtered server-side. */
+    castOffFrom?: string;
     purposes?: string;
     commodityIds?: string;
   };
@@ -140,6 +142,7 @@ export const jettyRoutes = {
     params: {
       startDate: 'start_date',
       endDate: 'end_date',
+      castOffFrom: 'cast_off_from',
       status: 'status',
       purpose: 'purpose',
       jettyId: 'jetty_id',
@@ -147,13 +150,21 @@ export const jettyRoutes = {
     },
     rowsPath: '',
     portHeader: true,
-    verifiedOn: '2026-09-16',
+    verifiedOn: '2026-09-22',
     observedMs: 60,
     notes:
-      'Bare array. Per the TechDoc the date filter is an ETA window over COALESCE(plan.eta, ' +
-      'created_at), NOT an execution-date window - so a date range here selects operations whose PLAN ' +
-      'was due in it, which is a different question from what happened in it. Not yet independently ' +
-      'verified; verify before reporting anything date-bounded.',
+      'Bare array. THE DATE FILTERS ARE NOW READ FROM THE SERVER SQL (Backend/src/routes/operations.js, ' +
+      '22 Sep 2026), not inferred from the TechDoc: ' +
+      'start_date -> COALESCE(sp.eta, o.created_at) >= d, and end_date -> the same expression < d plus ' +
+      'one day, half-open. So a date range here selects operations whose PLAN was due in it, which is a ' +
+      'different question from what happened in it. That was flagged unverified before; it is confirmed. ' +
+      'cast_off_from WAS MISSING FROM THIS MAP and is the one that answers "what sailed since": it ' +
+      'filters COALESCE(sp.cast_off_at, o.cast_off_at, o.sailed_at, o.actual_completion_time) >= d, ' +
+      'server-side. It is a LOWER BOUND ONLY - there is no cast_off_to - so an upper bound still has to ' +
+      'be applied locally. ' +
+      'Note the row exposes castOffAt as COALESCE(sp.cast_off_at, o.cast_off_at) via planTimeline(), ' +
+      'which is the first two terms of the filter, so local narrowing should fall back through sailedAt ' +
+      'and actualCompletionTime to match what the server selected.',
   },
 
   // ---------------------------------------------------------------- allocation

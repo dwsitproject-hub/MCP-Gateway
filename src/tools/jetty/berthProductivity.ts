@@ -18,8 +18,9 @@
  *   4. OUTLIER GUARDS. A wait longer than the berth stay is discarded, as is a wait over
  *      8,760 hours - defences against a corrupt TA. Without them one bad row moves the
  *      median.
- *   5. WINDOW is half-open on CAST-OFF: [start, end). JPS itself filters on planned ETA,
- *      so the fetch reaches further back and the narrowing happens here.
+ *   5. WINDOW is half-open on CAST-OFF: [start, end). JPS applies the lower bound
+ *      server-side via cast_off_from; the upper bound and the half-open edge are
+ *      applied here, because the endpoint has no cast_off_to.
  *
  * Source: Frontend/src/pages/ManagementDashboard.jsx, computeFlow() and toRow(), read
  * 22 Sep 2026. If that file changes, this drifts - which is why the payload names the
@@ -35,7 +36,6 @@ import { describe, type ToolDefinition, type ToolOutcome } from './../klip/types
 
 const CAP = 1;
 const H = 3_600_000;
-const CAST_OFF_LOOKBACK_DAYS = 120;
 /** Beyond this a TA is treated as corrupt, exactly as the page does. */
 const MAX_WAIT_HOURS = 8760;
 
@@ -98,12 +98,6 @@ function median(values: Array<number | null>): number | null {
   return s.length % 2 === 1 ? (s[m] ?? null) : ((s[m - 1] ?? 0) + (s[m] ?? 0)) / 2;
 }
 
-function shiftDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 interface FlowRow {
   vessel: string;
   tb: string | undefined;
@@ -151,11 +145,19 @@ export const jettyBerthProductivity: ToolDefinition<typeof inputShape> = {
     const calls: JettyCallRecord[] = [];
     const route = jettyRoutes.operations;
 
+    /**
+     * JPS filters the lower bound itself. cast_off_from was missing from the route map
+     * until the server SQL was read; it applies
+     * COALESCE(sp.cast_off_at, o.cast_off_at, o.sailed_at, o.actual_completion_time) >= d.
+     * It is a lower bound only, so the upper bound stays local - which is also where
+     * the dashboard's half-open [start, end) lives.
+     */
     const query: Record<string, string | number | undefined> = {};
-    if (route.params.startDate !== undefined) {
-      query[route.params.startDate] = shiftDays(params.date_from, -CAST_OFF_LOOKBACK_DAYS);
+    if (route.params.castOffFrom !== undefined) {
+      query[route.params.castOffFrom] = `${params.date_from}T00:00:00Z`;
+    } else if (route.params.startDate !== undefined) {
+      query[route.params.startDate] = params.date_from;
     }
-    if (route.params.endDate !== undefined) query[route.params.endDate] = params.date_to;
 
     const fetched = await jettyGet<OperationRow[]>(route.path, query, calls);
     const all = Array.isArray(fetched) ? fetched : [];

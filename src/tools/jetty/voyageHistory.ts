@@ -40,14 +40,17 @@ import { describe, type ToolDefinition, type ToolOutcome } from './../klip/types
 const CAP = 50;
 
 /**
- * How far before the requested window to fetch when filtering by cast-off.
+ * Resolve the cast-off the SERVER filtered on.
  *
- * A voyage planned in April and cast off in June belongs in a June cast-off answer, and
- * JPS will only return it under an April plan-eta window. 120 days is longer than any
- * port stay observed (the dashboard's longest alongside was 9.9 days), with room for a
- * plan raised well before arrival.
+ * cast_off_from matches COALESCE(sp.cast_off_at, o.cast_off_at, o.sailed_at,
+ * o.actual_completion_time), while the row exposes castOffAt as only the first two of
+ * those. Falling through the remaining terms keeps the local upper bound selecting the
+ * same rows the server's lower bound did - otherwise a voyage with only a sailedAt
+ * passes the server filter and is dropped here, which reads as a quieter month.
  */
-const CAST_OFF_LOOKBACK_DAYS = 120;
+function castOffOf(r: OperationRow): string | undefined {
+  return r.castOffAt ?? r.sailedAt ?? r.actualCompletionTime;
+}
 
 const inputShape = {
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Start of the period, inclusive.'),
@@ -107,12 +110,6 @@ function hoursBetween(from: string | undefined, to: string | undefined): number 
   return Math.round(((b - a) / 3_600_000) * 10) / 10;
 }
 
-function shiftDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 export const jettyVoyageHistory: ToolDefinition<typeof inputShape> = {
   name: 'jetty_voyage_history',
   title: 'JPS voyages over a period',
@@ -152,15 +149,21 @@ export const jettyVoyageHistory: ToolDefinition<typeof inputShape> = {
     const calls: JettyCallRecord[] = [];
     const route = jettyRoutes.operations;
 
-    // Fetch wider than asked when filtering on cast-off, because JPS filters on the
-    // PLANNED eta and a late voyage would otherwise fall outside the window it belongs
-    // to. Widening costs rows; not widening costs voyages, silently.
-    const fetchFrom =
-      params.date_basis === 'cast_off' ? shiftDays(params.date_from, -CAST_OFF_LOOKBACK_DAYS) : params.date_from;
-
+    /**
+     * Ask JPS to do the cast-off filtering, now that the source shows it can.
+     *
+     * This replaces a 120-day lookback that fetched a wide plan-eta window and narrowed
+     * here - a guess that was too wide most days and could still have been too narrow
+     * for a long-delayed plan. cast_off_from is exact and server-side. It is a LOWER
+     * bound only, so the upper bound is still applied locally.
+     */
     const query: Record<string, string | number | undefined> = {};
-    if (route.params.startDate !== undefined) query[route.params.startDate] = fetchFrom;
-    if (route.params.endDate !== undefined) query[route.params.endDate] = params.date_to;
+    if (params.date_basis === 'cast_off' && route.params.castOffFrom !== undefined) {
+      query[route.params.castOffFrom] = `${params.date_from}T00:00:00Z`;
+    } else {
+      if (route.params.startDate !== undefined) query[route.params.startDate] = params.date_from;
+      if (route.params.endDate !== undefined) query[route.params.endDate] = params.date_to;
+    }
     if (params.purpose !== undefined && route.params.purpose !== undefined) {
       query[route.params.purpose] = params.purpose;
     }
@@ -173,7 +176,8 @@ export const jettyVoyageHistory: ToolDefinition<typeof inputShape> = {
 
     const inWindow = fetched.filter((r) => {
       if (params.date_basis === 'plan_eta') return true; // JPS already applied it
-      const castOff = r.castOffAt ?? r.sailedAt;
+      // Only the UPPER bound is applied here; the lower one was cast_off_from upstream.
+      const castOff = castOffOf(r);
       if (castOff === undefined) return false;
       const t = Date.parse(castOff);
       return Number.isFinite(t) && t >= from && t <= to;
@@ -246,12 +250,13 @@ export const jettyVoyageHistory: ToolDefinition<typeof inputShape> = {
         basis_note:
           params.date_basis === 'cast_off'
             ? 'Voyages that CAST OFF inside the window, matching how the JPS Management Dashboard buckets ' +
-              `its flow KPIs. JPS itself filters on the planned eta, so rows were fetched from ` +
-              `${fetchFrom} - ${String(CAST_OFF_LOOKBACK_DAYS)} days earlier - and narrowed here, so a ` +
-              'voyage planned before the window but sailed inside it is still included.'
-            : 'Passed straight to JPS, which filters over COALESCE(plan.eta, created_at) - operations ' +
-              'whose PLAN was due in the window, NOT what happened in it. A voyage planned in May and ' +
-              'cast off in June is in a May window. Use cast_off to ask what actually sailed.',
+              'its flow KPIs. The lower bound was applied BY JPS via cast_off_from, over ' +
+              'COALESCE(plan.cast_off_at, cast_off_at, sailed_at, actual_completion_time); the upper ' +
+              'bound is applied here, because the endpoint offers no cast_off_to.'
+            : 'Passed straight to JPS, which filters over COALESCE(plan.eta, created_at) >= from and ' +
+              '< to plus one day - operations whose PLAN was due in the window, NOT what happened in ' +
+              'it. Confirmed against the server SQL, not inferred. A voyage planned in May and cast off ' +
+              'in June is in a May window. Use cast_off to ask what actually sailed.',
         rows_fetched_before_narrowing: fetched.length,
       },
       computed_here:
