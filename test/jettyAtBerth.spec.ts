@@ -9,9 +9,15 @@
  * passed while production stayed broken.
  */
 import type { Server } from 'node:http';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockJetty, freshJettyState, type MockJettyState } from './fixtures/mockJetty.js';
 import { PORTS } from './fixtures/ports.js';
+
+// runTool audits every call; the runner path is what is under test, not the audit store.
+vi.mock('../src/core/audit.js', () => ({
+  write: vi.fn().mockResolvedValue(undefined),
+  newRequestId: () => 'test-request',
+}));
 
 // Allocated in the registry, not picked here. 5193 was hardcoded first and is
 // hubTokenAuth's - the collision would have surfaced as nine Hub failures rather than
@@ -204,6 +210,26 @@ describe('provenance', () => {
     expect(envelope._integrity).not.toMatch(/KLIP/);
     expect(envelope.source).toMatch(/^JPS staging/);
     expect(envelope.environment).toBe('staging');
+  });
+
+  it('says JPS on the LIVE path, through the runner, not only when wrap() is called directly', async () => {
+    /**
+     * The test above passed for five weeks while every JPS answer in production said
+     * "Data from KLIP". It calls wrap() with the whole outcome spread in, so `system`
+     * arrives - but the runner built the envelope field by field and never passed it,
+     * so on the real path the provenance defaulted to KLIP. Same shape as the nextStep
+     * bug the runner's own comment describes. Found in review on 14 Oct 2026.
+     *
+     * This drives the tool through runTool, the way the MCP server does, and checks the
+     * envelope that would reach a user.
+     */
+    const { runTool } = await import('../src/mcp/runner.js');
+    const r = await runTool(m.tool as never, {}, ctx);
+    expect(r.isError).toBeUndefined();
+    const env = r.structuredContent as { _integrity: string; source: string };
+    expect(env._integrity).toMatch(/Jetty Planning System/);
+    expect(env._integrity).not.toMatch(/KLIP/);
+    expect(env.source).toMatch(/^JPS /);
   });
 
   it('claims no units, because JPS carries a metric code per row', async () => {

@@ -102,7 +102,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          38 suites, 453 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
+test/          38 suites, 454 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -343,7 +343,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 38 suites, 453 tests
+npm test     # 38 suites, 454 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:
