@@ -85,7 +85,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          36 suites, 424 tests, with mock KLIP, mock JPS and mock Hub
+test/          36 suites, 425 tests, with mock KLIP, mock JPS and mock Hub
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -233,6 +233,19 @@ a loopback redirect, whatever the flag says. Only the literal `127.0.0.1` counts
 docker compose exec -T gateway node dist/cli.js client:add "Milo – Atlas" http://127.0.0.1:4242/api/gateway/callback
 ```
 
+Three operational consequences of a local app, none of them visible in its code:
+
+- **It shares its user's rate limit.** `RATE_LIMIT_USER` is keyed on the OAuth subject,
+  30 calls per 5 minutes. Agents signing in as a person share that bucket with each
+  other *and* with the person's own Claude — an agent loop can 429 the human.
+- **It calls the public endpoint from the corporate network**, the egress path that has
+  been intermittently blocked. Token refresh and every `/mcp` call depend on it.
+- **It conflicts with the planned `/mcp` source-address allowlist** in
+  `deploy/nginx/mcp.conf`, which admits only Anthropic's egress. See the comment there.
+
+There is no per-client off-switch yet. Turning the flag off blocks new sign-ins only;
+cutting off one app today means `user:disable` on its person or the kill switch.
+
 ### The break-glass account
 
 Exactly one local password account, for when the Hub is down or misconfigured. Forces a
@@ -313,7 +326,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 36 suites, 424 tests
+npm test     # 36 suites, 425 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

@@ -51,4 +51,24 @@ describe('dynamic registration never accepts loopback', () => {
     ).rejects.toThrow(/redirect_uris must be https/);
   });
 
+  it('still rejects it with ALLOW_LOOPBACK_REDIRECTS ON - the claim is "whatever the flag says"', async () => {
+    /**
+     * Added in review. The test above runs with the flag at its default of false, so it
+     * proves /register refuses loopback when the feature is OFF - which nobody doubted.
+     * The guarantee that matters is the other half: that turning the feature on for
+     * client:add does not also open the public endpoint. If registerClient were ever
+     * changed to pass { loopback: cfg.ALLOW_LOOPBACK_REDIRECTS }, the first test would
+     * still pass and anyone on the internet could mint a loopback client. This one fails.
+     */
+    const mutable = cfg as { ALLOW_LOOPBACK_REDIRECTS: boolean };
+    const before = mutable.ALLOW_LOOPBACK_REDIRECTS;
+    mutable.ALLOW_LOOPBACK_REDIRECTS = true;
+    try {
+      await expect(
+        clientsStore.registerClient!({ client_name: 'Milo - Atlas', redirect_uris: [MILO] } as never),
+      ).rejects.toThrow(/redirect_uris must be https/);
+    } finally {
+      mutable.ALLOW_LOOPBACK_REDIRECTS = before;
+    }
+  });
 });
