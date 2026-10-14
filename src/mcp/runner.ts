@@ -12,7 +12,7 @@
  */
 import * as audit from './../core/audit.js';
 import * as rateLimit from './../core/rateLimit.js';
-import { GatewayError, GuardError, rateLimited, toGatewayError } from './../core/errors.js';
+import { GatewayError, GuardError, capabilityUnavailable, rateLimited, toGatewayError } from './../core/errors.js';
 import { logger } from './../core/logger.js';
 import { errorResult, successResult, wrap, type ToolResult } from './envelope.js';
 import type { InputShape, ToolContext, ToolDefinition } from './../tools/klip/types.js';
@@ -34,6 +34,15 @@ export async function runTool(
     return errorResult(def.name, err.toToolError());
   }
 
+  // --- admin-only tools: refused here even if one were somehow advertised --
+  if (def.adminOnly === true && ctx.isAdmin !== true) {
+    await audit
+      .write({ event: 'tool_outcome', ctx, tool: def.name, outcome: 'NOT_ADMIN', latencyMs: 0, detail: { severity: 'high' } })
+      .catch(() => undefined);
+    logger.warn({ tool: def.name, user: ctx.userId }, 'admin-only tool called by a non-admin');
+    return errorResult(def.name, capabilityUnavailable(def.title, 'This tool is available to gateway administrators only.').toToolError());
+  }
+
   // --- audit the request before anything leaves the process --------------
   await audit.write({ event: 'tool_request', ctx, tool: def.name, params });
 
@@ -53,6 +62,10 @@ export async function runTool(
         // tool's own payload. The override existed for two commits without reaching the
         // wire because this line was missing.
         nextStep: outcome.nextStep,
+        // Also carried through: without it every JPS envelope said "Data from KLIP" -
+        // tests that called wrap() directly could not see the gap.
+        system: outcome.system,
+        maxFreeText: outcome.maxFreeText,
       },
       outcome.data,
     );

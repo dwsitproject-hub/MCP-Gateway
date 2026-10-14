@@ -26,6 +26,7 @@ import { SERVER_INFO } from './mcp/server.js';
 import { toolNames } from './tools/klip/index.js';
 import { knowledgeTools } from './tools/knowledge/index.js';
 import { jettyTools } from './tools/jetty/index.js';
+import { dwshubTools } from './tools/dwshub/index.js';
 
 const HOUSEKEEPING_INTERVAL_MS = 15 * 60_000;
 
@@ -82,12 +83,14 @@ async function main(): Promise<void> {
       {
         port: cfg.PORT,
         bind: cfg.BIND_ADDRESS,
-        tools: toolNames.length + knowledgeTools.length + jettyTools.length,
+        tools: toolNames.length + knowledgeTools.length + jettyTools.length + dwshubTools.length,
         klip_tools: toolNames.length,
         knowledge_tools: knowledgeTools.length,
         // Zero when JPS is not configured, which is the honest report: the family
         // exists in the codebase and is not exposed by this deployment.
         jetty_tools: jettyTools.length,
+        // Admin-only, and zero when the DWS Hub data API is not configured.
+        dwshub_tools: dwshubTools.length,
       },
       'listening (public access is via nginx only - T-2)',
     );

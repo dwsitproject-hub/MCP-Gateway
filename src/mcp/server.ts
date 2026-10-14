@@ -22,6 +22,8 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { klipTools } from './../tools/klip/index.js';
 import { knowledgeTools } from './../tools/knowledge/index.js';
 import { jettyTools } from './../tools/jetty/index.js';
+import { dwshubTools } from './../tools/dwshub/index.js';
+import { findByEmail } from './../auth/users.js';
 import type { InputShape, ToolDefinition } from './../tools/klip/types.js';
 import { envelopeShape } from './envelope.js';
 import { runTool } from './runner.js';
@@ -36,6 +38,8 @@ export interface RequestIdentity {
   userId: string;
   clientIp?: string | undefined;
   oauthClientId?: string | undefined;
+  /** Gateway admin (users.is_admin), looked up per request. Gates the adminOnly tools. */
+  isAdmin?: boolean | undefined;
 }
 
 /** Pull the human identity out of the verified token. Never out of a session id. */
@@ -80,6 +84,7 @@ function register(server: McpServer, def: ToolDefinition<InputShape>, identity: 
         userId: identity.userId,
         clientIp: identity.clientIp,
         oauthClientId: identity.oauthClientId,
+        isAdmin: identity.isAdmin,
       })) as never,
   );
 }
@@ -112,7 +117,32 @@ export function createServer(identity: RequestIdentity, knowledgeInstructions = 
   // reach its upstream is not advertised, so its absence reads as absence rather than
   // as a broken tool.
   for (const def of jettyTools) register(server, def as ToolDefinition<InputShape>, identity);
+  // DWS Hub production-support data is admin-only in the Hub, so only gateway admins see
+  // these tools at all. The runner refuses them for anyone else as well.
+  for (const def of dwshubTools) {
+    if (def.adminOnly !== true || identity.isAdmin === true) register(server, def as ToolDefinition<InputShape>, identity);
+  }
   return server;
+}
+
+export const DWSHUB_INSTRUCTIONS =
+  ' The dwshub_* tools read production support from the DWS Hub: what its Sentinel agent found in bug reports ' +
+  'and JavaScript errors from the applications on the Hub SDK, and its health reports. Start with dwshub_app_health. ' +
+  'They are read-only and never start a new Sentinel analysis.';
+
+/**
+ * Whether this caller is a gateway admin. Read from the database on every request, like
+ * the /admin UI does, so revoking admin takes effect on the next call. Skipped when no
+ * admin-only tool is configured. Any failure means "not admin".
+ */
+export async function lookupAdmin(userId: string): Promise<boolean> {
+  if (!dwshubTools.some((t) => t.adminOnly === true)) return false;
+  try {
+    const row = await findByEmail(userId);
+    return row !== undefined && row.disabled_at === null && row.is_admin === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -126,11 +156,13 @@ export async function handleMcpRequest(
   clientIp: string | undefined,
 ): Promise<void> {
   const identity = identityFrom(req.auth, clientIp);
+  identity.isAdmin = await lookupAdmin(identity.userId);
   // Verified+pinned knowledge rides the instructions field so every client, on
   // every provider, starts from the same curated context. Best-effort: a
   // database hiccup must not fail the MCP handshake.
   const knowledgeInstructions = await instructionsBlock().catch(() => '');
-  const server = createServer(identity, knowledgeInstructions);
+  const hubNote = identity.isAdmin === true && dwshubTools.length > 0 ? DWSHUB_INSTRUCTIONS : '';
+  const server = createServer(identity, hubNote + knowledgeInstructions);
   // Omitting sessionIdGenerator IS stateless mode per the SDK: "If not provided,
   // session management is disabled". Passing an explicit `undefined` is rejected
   // under exactOptionalPropertyTypes, which TSD Section 2 requires.

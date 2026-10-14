@@ -99,6 +99,18 @@ const Env = z.object({
   JETTY_PORT_ID: z.coerce.number().int().positive().optional(),
   JETTY_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 
+  /**
+   * DWS Hub DATA API - Sentinel's production-support results (not the Hub OIDC login,
+   * which is HUB_*). ALL OPTIONAL, like JPS: unset means the dwshub_* family is not
+   * advertised. DWSHUB_BASE_URL is the service API root, e.g.
+   * https://hub.example.com/api/service/v1. The key is a read-only service key
+   * (`hubsvc_...`) that the Hub accepts on those GET routes and nowhere else.
+   */
+  DWSHUB_ENV: z.enum(['staging', 'production']).optional(),
+  DWSHUB_BASE_URL: z.string().url().optional(),
+  DWSHUB_SERVICE_KEY: z.string().min(20).optional(),
+  DWSHUB_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+
   OAUTH_SIGNING_KEY_PATH: z.string().min(1),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
@@ -257,7 +269,7 @@ const SECRET_KEYS = ['KLIP_SVC_PASS', 'DATABASE_URL'] as const;
  * production gateway from starting, before it even reached the Hub TLS check. An
  * integration nobody has configured must not be able to take the gateway down.
  */
-const OPTIONAL_SECRET_KEYS = ['JETTY_SVC_PASS'] as const;
+const OPTIONAL_SECRET_KEYS = ['JETTY_SVC_PASS', 'DWSHUB_SERVICE_KEY'] as const;
 
 function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
   if (cfg.NODE_ENV !== 'production') return;
@@ -283,6 +295,23 @@ function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
     console.error(`FATAL: refusing to boot in production:\n  - ${problems.join('\n  - ')}`);
     process.exit(1);
   }
+}
+
+/**
+ * The DWS Hub data API carries a bearer service key on every request, so a plaintext
+ * link would hand that key to anyone on the path. Refused in production; tolerated with a
+ * warning elsewhere, and only ever on a network path (loopback is fine).
+ */
+function assertDwsHubTls(cfg: z.infer<typeof Env>): void {
+  if (cfg.DWSHUB_BASE_URL === undefined) return;
+  const parsed = new URL(cfg.DWSHUB_BASE_URL);
+  if (parsed.protocol !== 'http:' || ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) return;
+  const line = `DWSHUB_BASE_URL is plaintext http (${parsed.origin}); the service key would cross the network in the clear.`;
+  if (cfg.KLIP_ENV === 'production') {
+    console.error(`FATAL: ${line} Serve the Hub API over https.`);
+    process.exit(1);
+  }
+  console.warn(`WARNING: ${line} Acceptable on staging only.`);
 }
 
 /**
@@ -444,6 +473,7 @@ function load(): Config {
   assertNoPlaceholderSecrets(cfg);
   assertDatabaseTls(cfg);
   assertHubTls(cfg);
+  assertDwsHubTls(cfg);
   assertEnvironmentCoherence(cfg);
 
   const publicUrl = cfg.PUBLIC_URL.replace(/\/+$/, '');

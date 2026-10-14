@@ -17,18 +17,35 @@ Both upstreams are on **production** as of 14–16 Sep 2026.
 
 ## 1. What it exposes
 
-**22 tools.** Every one read-only toward its upstream; the four that write touch only
+**27 tools.** Every one read-only toward its upstream; the four that write touch only
 the gateway's own Postgres.
 
 | Family | Tools |
 |---|---|
 | **KLIP** (13) | `klip_search_contracts` `klip_get_contract` `klip_outstanding` `klip_shipment_status` `klip_shipping_performance` `klip_performance_summary` `klip_price_summary` `klip_oil_loss` `klip_trucking_ops` `klip_quality_surveys` `klip_payment_status` `klip_sap_import_status` `klip_reference` |
 | **JPS** (5) | `jetty_at_berth` `jetty_voyage_history` `jetty_berth_productivity` `jetty_tank_farm` `jetty_vessel_crosscheck` |
+| **DWS Hub** (5, admins only) | `dwshub_app_health` `dwshub_sentinel_findings` `dwshub_sentinel_detail` `dwshub_bug_reports` `dwshub_error_trends` |
 | **Gateway-local** (4) | `klip_knowledge_search` `klip_knowledge_save` `klip_knowledge_feedback` `klip_report_gap` |
 
 The JPS family is **empty when JPS is unconfigured**. Advertising a tool that always
 fails is worse than not advertising it: a model that can see it will reach for it, and
 "no JPS connection" arrives as a tool error rather than as an honest absence.
+
+### DWS Hub production support — admins only
+
+The `dwshub_*` family reads what the DWS Hub's **Sentinel** agent has already produced: bug and
+JavaScript-error analyses (severity, root cause, proposed fix), per-application health reports, and the
+bug reports and error groups behind them. Milo's production-support agent uses it for the daily summary.
+
+- **Source:** the Hub's read-only service API (`/api/service/v1`), with a service key the Hub accepts on
+  those GET routes only (`DWSHUB_BASE_URL`, `DWSHUB_SERVICE_KEY`). Not the Hub OIDC login (`HUB_*`).
+  Empty when unconfigured, like JPS. Plaintext `http` is refused at boot in production.
+- **Admins only.** Sentinel's output is admin-only in the Hub, so the gateway does not widen it to every
+  pilot user: the tools are advertised only to callers with `is_admin` (read from the database on every
+  request), and the runner refuses them for anyone else, audited as `NOT_ADMIN`.
+- **Never starts work in the Hub.** No tool can start an analysis, change a report or spend the Hub's
+  Anthropic budget. A proposed code patch stays in the Hub (`has_patch` says one exists).
+- **People are pseudonyms.** The Hub replaces every email with a stable pseudonym before answering.
 
 ### The two upstreams answer different questions
 
@@ -85,7 +102,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          36 suites, 425 tests, with mock KLIP, mock JPS and mock Hub
+test/          38 suites, 453 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -326,7 +343,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 36 suites, 425 tests
+npm test     # 38 suites, 453 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

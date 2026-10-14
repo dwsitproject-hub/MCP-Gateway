@@ -18,6 +18,11 @@ export interface ToolContext {
   userId: string;
   clientIp?: string | undefined;
   oauthClientId?: string | undefined;
+  /**
+   * Whether the caller is a gateway admin (users.is_admin), read from the database for
+   * this request. Only adminOnly tools look at it.
+   */
+  isAdmin?: boolean | undefined;
 }
 
 export interface ToolOutcome {
@@ -42,7 +47,12 @@ export interface ToolOutcome {
    * behind one connector, this field is the only thing telling a reader which system
    * produced the number in front of them.
    */
-  system?: 'klip' | 'jetty' | undefined;
+  system?: 'klip' | 'jetty' | 'dwshub' | undefined;
+  /**
+   * Longest free-text value the envelope keeps (default 300). Raised only where the long
+   * text IS the answer - a Sentinel root cause is useless cut at 300 characters.
+   */
+  maxFreeText?: number | undefined;
   /**
    * Overrides the envelope's default next_step.
    *
@@ -73,6 +83,13 @@ export interface ToolDefinition<Shape extends InputShape = InputShape> {
    * blocks non-GET regardless. Defaults to true.
    */
   readOnly?: boolean;
+  /**
+   * Only gateway admins (users.is_admin) may see or call this tool. Pilot membership is
+   * the data-access control for KLIP and JPS; the DWS Hub's production-support data is
+   * admin-only in the Hub itself, so the gateway must not widen it to every pilot user.
+   * Enforced twice: the tool is not advertised to others, and the runner refuses the call.
+   */
+  adminOnly?: boolean;
   handler: (params: z.infer<z.ZodObject<Shape>>, ctx: ToolContext) => Promise<ToolOutcome>;
 }
 
