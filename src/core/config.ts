@@ -112,6 +112,16 @@ const Env = z.object({
     .default('https://claude.ai,https://claude.com')
     .transform((s) => s.split(',').map((o) => o.trim()).filter(Boolean)),
 
+  /**
+   * Lets an admin pre-register (`client:add`) a client that receives its code on
+   * http://127.0.0.1:<port> - a local app such as Milo, RFC 8252. Dynamic
+   * registration never accepts loopback, whatever this says.
+   */
+  ALLOW_LOOPBACK_REDIRECTS: z
+    .string()
+    .default('false')
+    .transform((v) => v.toLowerCase() === 'true' || v === '1'),
+
   /** Registered redirect URIs must live under one of these origins (T-8). */
   ALLOWED_REDIRECT_ORIGINS: z
     .string()

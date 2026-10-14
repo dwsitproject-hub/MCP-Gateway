@@ -40,16 +40,17 @@ interface ClientRow {
  * allowed origins. This rejects claude.ai.evil.com, claude.ai@evil.com,
  * sub.claude.ai and http downgrades without relying on pattern subtleties.
  */
-export function isAllowedRedirectUri(uri: string): boolean {
+export function isAllowedRedirectUri(uri: string, opts: { loopback?: boolean } = {}): boolean {
   let parsed: URL;
   try {
     parsed = new URL(uri);
   } catch {
     return false;
   }
-  if (parsed.protocol !== 'https:') return false;
   if (parsed.username !== '' || parsed.password !== '') return false;
   if (parsed.hash !== '') return false;
+  if (opts.loopback === true && isLoopbackRedirect(uri, parsed)) return true;
+  if (parsed.protocol !== 'https:') return false;
   return cfg.ALLOWED_REDIRECT_ORIGINS.some((allowed) => {
     try {
       return new URL(allowed).origin === parsed.origin;
@@ -57,6 +58,22 @@ export function isAllowedRedirectUri(uri: string): boolean {
       return false;
     }
   });
+}
+
+/**
+ * A native app on the user's own machine (Milo) receives its code on the loopback
+ * interface: RFC 8252 section 7.3. Only the literal 127.0.0.1 - never the name
+ * "localhost", which can resolve elsewhere (section 8.3) - and any port, which the
+ * app picks. A code delivered here never leaves the machine that asked for it.
+ *
+ * Only for clients an admin pre-registers from a shell (`client:add`) with
+ * ALLOW_LOOPBACK_REDIRECTS on. Dynamic registration never accepts it, so the public
+ * /register endpoint cannot be used to mint loopback clients.
+ */
+function isLoopbackRedirect(uri: string, parsed: URL): boolean {
+  // Written literally, too: the URL parser also turns 0x7f000001 or 2130706433 into
+  // 127.0.0.1, and a registered value should read as what it is.
+  return parsed.protocol === 'http:' && parsed.hostname === '127.0.0.1' && /^http:\/\/127\.0\.0\.1(:\d{1,5})?\//.test(uri);
 }
 
 function toClientInformation(row: ClientRow): OAuthClientInformationFull {
@@ -140,8 +157,12 @@ export async function preRegister(
   redirectUris: string[],
   withSecret: boolean,
 ): Promise<{ clientId: string; clientSecret?: string }> {
-  const rejected = redirectUris.filter((uri) => !isAllowedRedirectUri(uri));
-  if (rejected.length > 0) throw new Error(`disallowed redirect_uris: ${rejected.join(', ')}`);
+  const loopback = cfg.ALLOW_LOOPBACK_REDIRECTS;
+  const rejected = redirectUris.filter((uri) => !isAllowedRedirectUri(uri, { loopback }));
+  if (rejected.length > 0) {
+    const hint = !loopback && rejected.some((u) => u.startsWith('http://127.0.0.1')) ? ' (set ALLOW_LOOPBACK_REDIRECTS=true for a local app)' : '';
+    throw new Error(`disallowed redirect_uris: ${rejected.join(', ')}${hint}`);
+  }
 
   const clientId = randomUUID();
   const secret = withSecret ? randomBytes(32).toString('base64url') : undefined;

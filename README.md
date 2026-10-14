@@ -85,7 +85,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          35 suites, 419 tests, with mock KLIP, mock JPS and mock Hub
+test/          36 suites, 424 tests, with mock KLIP, mock JPS and mock Hub
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -221,6 +221,18 @@ register. Note it infers "production Hub" from the *absence* of test/staging/uat
 the hostname, so `dwshub.kpndomain.com` reads as production either way — confirm the
 instance by hand.
 
+### Local apps (Milo) — loopback redirects
+
+A local app such as Milo receives its authorization code on `http://127.0.0.1:<port>`
+(RFC 8252). That is accepted **only** for clients an admin pre-registers from a shell
+with `ALLOW_LOOPBACK_REDIRECTS=true` — dynamic registration at `/register` never accepts
+a loopback redirect, whatever the flag says. Only the literal `127.0.0.1` counts, never
+`localhost`. The person still signs in with the Hub and must be on the pilot list.
+
+```bash
+docker compose exec -T gateway node dist/cli.js client:add "Milo – Atlas" http://127.0.0.1:4242/api/gateway/callback
+```
+
 ### The break-glass account
 
 Exactly one local password account, for when the Hub is down or misconfigured. Forces a
@@ -301,7 +313,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 35 suites, 419 tests
+npm test     # 36 suites, 424 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

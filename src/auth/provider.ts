@@ -158,7 +158,9 @@ export const provider: OAuthServerProvider = {
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     // Defence in depth: re-check the redirect target even though the SDK matched it
     // against the registration, in case a registration predates a policy change.
-    if (!isAllowedRedirectUri(params.redirectUri)) {
+    // A loopback target can only be registered by an admin (`client:add`), never by
+    // dynamic registration, so allowing it here admits exactly those clients.
+    if (!isAllowedRedirectUri(params.redirectUri, { loopback: cfg.ALLOW_LOOPBACK_REDIRECTS })) {
       res.status(400).type('text/plain').send('redirect_uri is not permitted by this authorization server');
       return;
     }
