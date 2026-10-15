@@ -22,7 +22,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { klipTools } from './../tools/klip/index.js';
 import { knowledgeTools } from './../tools/knowledge/index.js';
 import { jettyTools } from './../tools/jetty/index.js';
-import { dwshubTools } from './../tools/dwshub/index.js';
+import { dwshubControlTools, dwshubTools } from './../tools/dwshub/index.js';
 import { findByEmail } from './../auth/users.js';
 import type { InputShape, ToolDefinition } from './../tools/klip/types.js';
 import { envelopeShape } from './envelope.js';
@@ -119,7 +119,7 @@ export function createServer(identity: RequestIdentity, knowledgeInstructions = 
   for (const def of jettyTools) register(server, def as ToolDefinition<InputShape>, identity);
   // DWS Hub production-support data is admin-only in the Hub, so only gateway admins see
   // these tools at all. The runner refuses them for anyone else as well.
-  for (const def of dwshubTools) {
+  for (const def of [...dwshubTools, ...dwshubControlTools]) {
     if (def.adminOnly !== true || identity.isAdmin === true) register(server, def as ToolDefinition<InputShape>, identity);
   }
   return server;
@@ -136,7 +136,7 @@ export const DWSHUB_INSTRUCTIONS =
  * admin-only tool is configured. Any failure means "not admin".
  */
 export async function lookupAdmin(userId: string): Promise<boolean> {
-  if (!dwshubTools.some((t) => t.adminOnly === true)) return false;
+  if (![...dwshubTools, ...dwshubControlTools].some((t) => t.adminOnly === true)) return false;
   try {
     const row = await findByEmail(userId);
     return row !== undefined && row.disabled_at === null && row.is_admin === true;

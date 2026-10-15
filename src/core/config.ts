@@ -110,6 +110,15 @@ const Env = z.object({
   DWSHUB_BASE_URL: z.string().url().optional(),
   DWSHUB_SERVICE_KEY: z.string().min(20).optional(),
   DWSHUB_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  /**
+   * DWS Hub CONTROL API - the one Hub setting the gateway may change: which Claude model the
+   * Hub's Sentinel uses (Milo sets it when the Boss changes Sentinel's model). OPTIONAL: unset
+   * means dwshub_set_sentinel_model is not advertised. The key is a separate control key
+   * (`hubctl_...`, Hub HUB_SERVICE_CONTROL_KEYS), never the read key. The URL defaults to
+   * DWSHUB_BASE_URL with /api/service/v1 replaced by /api/service/control/v1.
+   */
+  DWSHUB_CONTROL_KEY: z.string().min(20).optional(),
+  DWSHUB_CONTROL_URL: z.string().url().optional(),
 
   OAUTH_SIGNING_KEY_PATH: z.string().min(1),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
@@ -269,7 +278,7 @@ const SECRET_KEYS = ['KLIP_SVC_PASS', 'DATABASE_URL'] as const;
  * production gateway from starting, before it even reached the Hub TLS check. An
  * integration nobody has configured must not be able to take the gateway down.
  */
-const OPTIONAL_SECRET_KEYS = ['JETTY_SVC_PASS', 'DWSHUB_SERVICE_KEY'] as const;
+const OPTIONAL_SECRET_KEYS = ['JETTY_SVC_PASS', 'DWSHUB_SERVICE_KEY', 'DWSHUB_CONTROL_KEY'] as const;
 
 function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
   if (cfg.NODE_ENV !== 'production') return;
@@ -303,15 +312,21 @@ function assertNoPlaceholderSecrets(cfg: z.infer<typeof Env>): void {
  * warning elsewhere, and only ever on a network path (loopback is fine).
  */
 function assertDwsHubTls(cfg: z.infer<typeof Env>): void {
-  if (cfg.DWSHUB_BASE_URL === undefined) return;
-  const parsed = new URL(cfg.DWSHUB_BASE_URL);
-  if (parsed.protocol !== 'http:' || ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) return;
-  const line = `DWSHUB_BASE_URL is plaintext http (${parsed.origin}); the service key would cross the network in the clear.`;
-  if (cfg.KLIP_ENV === 'production') {
-    console.error(`FATAL: ${line} Serve the Hub API over https.`);
-    process.exit(1);
+  const urls: Array<[string, string | undefined, string]> = [
+    ['DWSHUB_BASE_URL', cfg.DWSHUB_BASE_URL, 'service key'],
+    ['DWSHUB_CONTROL_URL', cfg.DWSHUB_CONTROL_URL, 'control key'],
+  ];
+  for (const [name, value, what] of urls) {
+    if (value === undefined) continue;
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' || ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) continue;
+    const line = `${name} is plaintext http (${parsed.origin}); the ${what} would cross the network in the clear.`;
+    if (cfg.KLIP_ENV === 'production') {
+      console.error(`FATAL: ${line} Serve the Hub API over https.`);
+      process.exit(1);
+    }
+    console.warn(`WARNING: ${line} Acceptable on staging only.`);
   }
-  console.warn(`WARNING: ${line} Acceptable on staging only.`);
 }
 
 /**

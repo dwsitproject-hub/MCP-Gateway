@@ -1,18 +1,22 @@
 /**
- * A stand-in for the DWS Hub read-only service API (Hub: backend/src/routes/service.js).
- * Same shapes as the real one, already redacted the way the Hub redacts. Records every
- * request so a test can prove the gateway only ever sent GETs with the service key.
+ * A stand-in for the DWS Hub read-only service API (Hub: backend/src/routes/service.js)
+ * and its control API (Hub: backend/src/routes/serviceControl.js - Sentinel's model only).
+ * Same shapes as the real ones, already redacted the way the Hub redacts. Records every
+ * request so a test can prove which key and method the gateway sent where.
  */
 import express, { type Express } from 'express';
 
 export const MOCK_DWSHUB_KEY = 'hubsvc_mock-key-for-tests-only-0000000000';
+export const MOCK_DWSHUB_CONTROL_KEY = 'hubctl_mock-control-key-for-tests-000000';
+export const HUB_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
 
 export interface MockDwsHubState {
-  requests: Array<{ method: string; path: string; auth: string | undefined; query: Record<string, unknown> }>;
+  requests: Array<{ method: string; path: string; auth: string | undefined; query: Record<string, unknown>; body?: unknown }>;
   rejectKey: boolean;
+  model: string;
 }
 
-export const freshDwsHubState = (): MockDwsHubState => ({ requests: [], rejectKey: false });
+export const freshDwsHubState = (): MockDwsHubState => ({ requests: [], rejectKey: false, model: 'claude-opus-5-5' });
 
 export const KLIP_ID = '0b9d3c55-6c1f-4b8e-9d55-0000000000a1';
 export const BUG_RUN = '7a1e0c2a-1111-4c3b-8d6e-0000000000b1';
@@ -20,9 +24,24 @@ const LONG = 'The checkout page reads user.profile before the login promise sett
 
 export function createMockDwsHub(state: MockDwsHubState): Express {
   const app = express();
+  app.use(express.json());
   app.use((req, _res, next) => {
-    state.requests.push({ method: req.method, path: req.path, auth: req.headers.authorization, query: { ...req.query } });
+    state.requests.push({ method: req.method, path: req.path, auth: req.headers.authorization, query: { ...req.query }, body: req.body });
     next();
+  });
+  // Control API: one route, GET/PUT, control key only, the Hub's own model list.
+  app.use('/api/service/control/v1', (req, res, next) => {
+    if (state.rejectKey || req.headers.authorization !== `Bearer ${MOCK_DWSHUB_CONTROL_KEY}`) return res.status(401).json({ error: 'A valid control key is required.' });
+    return next();
+  });
+  const allowed = HUB_MODELS.map((id) => ({ id, label: id }));
+  app.put('/api/service/control/v1/sentinel/model', (req, res) => {
+    const model = (req.body as { model?: string })?.model;
+    if (typeof model !== 'string' || !HUB_MODELS.includes(model)) return res.status(400).json({ error: 'Unsupported model.', allowed });
+    const previous = state.model;
+    state.model = model;
+    const by = (req.body as { requested_by?: string }).requested_by;
+    return res.json({ model, previous, changed: previous !== model, source: by ? `mcp-gateway (${by})` : 'mcp-gateway', updated_at: '2026-10-15T02:00:00.000Z', allowed });
   });
   app.use('/api/service/v1', (req, res, next) => {
     if (req.method !== 'GET') return res.status(405).json({ error: 'This API is read-only.' });

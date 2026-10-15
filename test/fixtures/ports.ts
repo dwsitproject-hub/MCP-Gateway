@@ -36,4 +36,5 @@ export const PORTS = {
   jettyTankFarm: 5207,
   priceSummary: 5208,
   dwshub: 5209,
+  dwshubControl: 5210,
 } as const;

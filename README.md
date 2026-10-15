@@ -45,6 +45,11 @@ bug reports and error groups behind them. Milo's production-support agent uses i
   request), and the runner refuses them for anyone else, audited as `NOT_ADMIN`.
 - **Never starts work in the Hub.** No tool can start an analysis, change a report or spend the Hub's
   Anthropic budget. A proposed code patch stays in the Hub (`has_patch` says one exists).
+- **One write, separately keyed.** `dwshub_set_sentinel_model` sets which Claude model the Hub's Sentinel
+  uses - nothing else. Milo calls it when the Boss changes Sentinel's model, so both stay in step. It is
+  outside the read-only family, needs its own control key (`DWSHUB_CONTROL_KEY`, `hubctl_...`; the read key
+  is never sent to the control API), is admin-only, advertises `readOnlyHint: false`, and is absent unless
+  that key is set. The Hub accepts only its own model list and audits every change.
 - **People are pseudonyms.** The Hub replaces every email with a stable pseudonym before answering.
 
 ### The two upstreams answer different questions
