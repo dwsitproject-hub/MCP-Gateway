@@ -68,8 +68,9 @@ function register(server: McpServer, def: ToolDefinition<InputShape>, identity: 
       annotations: {
         title: def.title,
         // Advertised so a client can see the read/write contract without parsing
-        // prose. Only the knowledge tools set readOnly: false, and they write to
-        // the gateway's own knowledge base - never to KLIP.
+        // prose. The knowledge tools set readOnly: false and write to the gateway's
+        // own knowledge base - never to KLIP. dwshub_set_sentinel_model is the one
+        // tool that writes upstream (one DWS Hub setting, admin-only).
         readOnlyHint: def.readOnly !== false,
         destructiveHint: false,
         idempotentHint: def.readOnly !== false,
@@ -130,6 +131,11 @@ export const DWSHUB_INSTRUCTIONS =
   'and JavaScript errors from the applications on the Hub SDK, and its health reports. Start with dwshub_app_health. ' +
   'They are read-only and never start a new Sentinel analysis.';
 
+/** Added only when the control tool is configured, so the line above stays true otherwise. */
+export const DWSHUB_CONTROL_INSTRUCTIONS =
+  ' The one exception is dwshub_set_sentinel_model, which WRITES a single Hub setting (the Claude model of the Hub Sentinel). ' +
+  'Call it only when a person has explicitly asked to change that model in this conversation.';
+
 /**
  * Whether this caller is a gateway admin. Read from the database on every request, like
  * the /admin UI does, so revoking admin takes effect on the next call. Skipped when no
@@ -161,7 +167,10 @@ export async function handleMcpRequest(
   // every provider, starts from the same curated context. Best-effort: a
   // database hiccup must not fail the MCP handshake.
   const knowledgeInstructions = await instructionsBlock().catch(() => '');
-  const hubNote = identity.isAdmin === true && dwshubTools.length > 0 ? DWSHUB_INSTRUCTIONS : '';
+  const hubNote =
+    identity.isAdmin === true && dwshubTools.length > 0
+      ? DWSHUB_INSTRUCTIONS + (dwshubControlTools.length > 0 ? DWSHUB_CONTROL_INSTRUCTIONS : '')
+      : '';
   const server = createServer(identity, hubNote + knowledgeInstructions);
   // Omitting sessionIdGenerator IS stateless mode per the SDK: "If not provided,
   // session management is disabled". Passing an explicit `undefined` is rejected

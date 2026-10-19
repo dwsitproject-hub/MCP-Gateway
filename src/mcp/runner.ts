@@ -66,6 +66,7 @@ export async function runTool(
         // tests that called wrap() directly could not see the gap.
         system: outcome.system,
         maxFreeText: outcome.maxFreeText,
+        upstreamWrite: outcome.upstreamWrite,
       },
       outcome.data,
     );

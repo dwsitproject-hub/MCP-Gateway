@@ -55,6 +55,7 @@ export const dwshubSetSentinelModel: ToolDefinition<typeof shape> = {
       asOf: new Date(res.updated_at ?? Date.now()),
       klipCalls: calls,
       system: 'dwshub',
+      upstreamWrite: true,
     };
     return outcome;
   },

@@ -17,8 +17,9 @@ Both upstreams are on **production** as of 14–16 Sep 2026.
 
 ## 1. What it exposes
 
-**27 tools.** Every one read-only toward its upstream; the four that write touch only
-the gateway's own Postgres.
+**28 tools.** Every one read-only toward its upstream except one: `dwshub_set_sentinel_model`
+changes a single DWS Hub setting, behind its own key and admin-only. The four knowledge
+tools that write touch only the gateway's own Postgres.
 
 | Family | Tools |
 |---|---|
@@ -107,7 +108,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          38 suites, 454 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
+test/          39 suites, 465 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -120,6 +121,8 @@ entrypoint and the consent router. All KLIP normalization lives in
 |---|---|
 | KLIP | `adapters/klip/client.ts` method guard: GET only, plus the single login POST. Exhaustive path/method table in `guard.spec.ts`. |
 | JPS | `adapters/jetty/client.ts`, same shape. `JettyRoute` has **no `method` field and no way to express one** — a mutation is not something the layer refuses at runtime, it is something it cannot describe. |
+| DWS Hub (read) | `adapters/dwshub/client.ts`, same shape: GET only, no method field, with a `hubsvc_` key the Hub accepts on its read routes only. |
+| DWS Hub (the one write) | `adapters/dwshub/control.ts`: one fixed URL, one PUT, its own `hubctl_` key; the Hub accepts only its own model list and audits each change. Absent unless `DWSHUB_CONTROL_KEY` is set. Its results say so: the envelope names the control key and drops "read-only". |
 | Credentials | KLIP: a read-only service account. JPS **production**: a view-only role, created 16 Sep before the connector was pointed at it. JPS staging still holds Full Access, so there the client guard is the only layer. |
 
 JPS deserves the belt and braces: it is the operational system of record, and its API
@@ -348,7 +351,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 38 suites, 454 tests
+npm test     # 39 suites, 465 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

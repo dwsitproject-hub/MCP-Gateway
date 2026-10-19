@@ -117,6 +117,26 @@ describe('dwshub_set_sentinel_model', () => {
   });
 });
 
+describe('provenance on the live path', () => {
+  it('does not call a write "read-only" when it reaches a user through the runner', async () => {
+    // The dwshub envelope says "read-only gateway path" and "read-only service key". On a
+    // write that is false, and it reads as a claim that nothing changed. Driven through
+    // runTool, because the JPS label bug hid for five weeks behind tests that called wrap().
+    const def = m.index.dwshubControlTools[0]!;
+    const r = await m.runner.runTool(def, { model: 'claude-sonnet-5-5' }, admin);
+    expect(r.isError).toBeUndefined();
+    const env = r.structuredContent as { _integrity: string; source: string };
+    expect(env._integrity).toMatch(/CHANGE made in the DWS Hub/);
+    expect(env._integrity).not.toMatch(/read-only/);
+    expect(env.source).toMatch(/control key/);
+    expect(env.source).not.toMatch(/read-only/);
+  });
+
+  it('tells admins about the one write, in the instructions they start from', () => {
+    expect(m.mcp.DWSHUB_CONTROL_INSTRUCTIONS).toMatch(/dwshub_set_sentinel_model, which WRITES/);
+  });
+});
+
 describe('admin only', () => {
   async function listTools(identity: { userId: string; isAdmin?: boolean }) {
     const srv = m.mcp.createServer(identity);

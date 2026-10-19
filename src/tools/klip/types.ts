@@ -54,6 +54,13 @@ export interface ToolOutcome {
    */
   maxFreeText?: number | undefined;
   /**
+   * Set by a tool whose call CHANGED something upstream - today only
+   * dwshub_set_sentinel_model. Without it the envelope says "read-only gateway path" and
+   * "read-only service key", which is false for a write and would be read as a claim
+   * that nothing was changed.
+   */
+  upstreamWrite?: true | undefined;
+  /**
    * Overrides the envelope's default next_step.
    *
    * The default assumes truncated means the FIGURES are partial. That is no longer true
