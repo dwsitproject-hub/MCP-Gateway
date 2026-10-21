@@ -251,6 +251,12 @@ const Env = z.object({
 
   /** Short-lived read cache. 0 disables it. Cached results report their real as_of. */
   CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(60),
+  /**
+   * klip_outstanding_breakdown asks KLIP once per plant/incoterm cell (up to 160 calls), so
+   * its result is kept longer than other tools'. Outstanding moves with SAP imports, not by
+   * the minute. CACHE_TTL_SECONDS=0 still disables it.
+   */
+  KLIP_BREAKDOWN_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(300),
 });
 
 export type Config = z.infer<typeof Env> & {

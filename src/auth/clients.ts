@@ -175,6 +175,62 @@ export async function preRegister(
   return secret === undefined ? { clientId } : { clientId, clientSecret: secret };
 }
 
+export interface ClientSummary {
+  client_id: string;
+  client_name: string;
+  redirect_uris: string[];
+  has_secret: boolean;
+  created_at: Date;
+  disabled_at: Date | null;
+  /** Refresh tokens still usable: signed-in sessions that can renew. */
+  live_sessions: number;
+  last_sign_in: Date | null;
+}
+
+/** Every registered client (CLI client:list). Read-only. */
+export async function listClients(): Promise<ClientSummary[]> {
+  return query<ClientSummary>(
+    `SELECT c.client_id, c.client_name, c.redirect_uris,
+            (c.client_secret_hash IS NOT NULL) AS has_secret, c.created_at, c.disabled_at,
+            COUNT(t.token_hash) FILTER (
+              WHERE t.revoked_at IS NULL AND t.consumed_at IS NULL AND t.expires_at > now())::int AS live_sessions,
+            MAX(t.created_at) AS last_sign_in
+       FROM oauth_clients c
+       LEFT JOIN oauth_tokens t ON t.client_id = c.client_id
+      GROUP BY c.client_id
+      ORDER BY c.created_at`,
+  );
+}
+
+/**
+ * Disable a client (CLI client:disable): no new sign-ins or token renewals, and its refresh
+ * tokens are revoked. Access tokens already issued run out within ACCESS_TOKEN_TTL_SECONDS.
+ * Returns the client's name, or undefined when there is no such enabled client.
+ */
+export async function disableClient(clientId: string): Promise<{ name: string; revoked: number } | undefined> {
+  const row = await queryOne<{ client_name: string }>(
+    'UPDATE oauth_clients SET disabled_at = now() WHERE client_id = $1 AND disabled_at IS NULL RETURNING client_name',
+    [clientId],
+  );
+  if (row === undefined) return undefined;
+  const revoked = await query<{ n: number }>(
+    `WITH r AS (UPDATE oauth_tokens SET revoked_at = now() WHERE client_id = $1 AND revoked_at IS NULL RETURNING 1)
+     SELECT count(*)::int AS n FROM r`,
+    [clientId],
+  );
+  logger.info({ clientId, name: row.client_name }, 'client disabled');
+  return { name: row.client_name, revoked: revoked[0]?.n ?? 0 };
+}
+
+/** Re-enable a disabled client (CLI client:enable). Its users sign in again. */
+export async function enableClient(clientId: string): Promise<{ name: string } | undefined> {
+  const row = await queryOne<{ client_name: string }>(
+    'UPDATE oauth_clients SET disabled_at = NULL WHERE client_id = $1 AND disabled_at IS NOT NULL RETURNING client_name',
+    [clientId],
+  );
+  return row === undefined ? undefined : { name: row.client_name };
+}
+
 /** Constant-time secret comparison for the pre-registered/confidential client path. */
 export async function verifyClientSecret(clientId: string, secret: string): Promise<boolean> {
   const row = await queryOne<{ client_secret_hash: string | null }>(

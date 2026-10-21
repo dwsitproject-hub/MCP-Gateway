@@ -40,9 +40,12 @@ export function purgeExpired(now = Date.now()): void {
 
 /**
  * Return a cached value or produce it. TTL of 0 disables caching entirely.
+ *
+ * `ttlSeconds` overrides CACHE_TTL_SECONDS for one expensive tool (e.g. a breakdown that
+ * costs KLIP 100+ calls). CACHE_TTL_SECONDS=0 still turns every cache off, overrides included.
  */
-export async function through<T>(key: string, produce: () => Promise<T>): Promise<Cached<T>> {
-  const ttlMs = cfg.CACHE_TTL_SECONDS * 1000;
+export async function through<T>(key: string, produce: () => Promise<T>, opts: { ttlSeconds?: number } = {}): Promise<Cached<T>> {
+  const ttlMs = cfg.CACHE_TTL_SECONDS === 0 ? 0 : (opts.ttlSeconds ?? cfg.CACHE_TTL_SECONDS) * 1000;
   if (ttlMs === 0) {
     return { value: await produce(), fetchedAt: new Date(), fromCache: false };
   }

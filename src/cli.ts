@@ -20,6 +20,9 @@
  *   user:password <email>          set a new password
  *   user:list                      list accounts and their state
  *   client:add <name> <uri,...>    pre-register an OAuth client (manual connector path)
+ *   client:list                    list OAuth clients, live sessions and last sign-in
+ *   client:disable <client_id>     refuse new sign-ins and revoke its refresh tokens
+ *   client:enable <client_id>      re-enable
  *   tokens:revoke-all              KILL SWITCH (S8): invalidate every issued token
  *   audit:export --from --to       CSV/JSONL export for IT Security (S4 / U5)
  *   audit:summary [--days N]       per-tool usage, error and truncation rates
@@ -34,7 +37,7 @@ import { cfg } from './core/config.js';
 import { closePool, query } from './core/db.js';
 import { runMigrations } from './core/migrate.js';
 import * as users from './auth/users.js';
-import { preRegister } from './auth/clients.js';
+import { disableClient, enableClient, listClients, preRegister } from './auth/clients.js';
 import * as hub from './auth/hub.js';
 import { revokeAll, revokeUser } from './auth/tokens.js';
 import * as audit from './core/audit.js';
@@ -383,6 +386,53 @@ async function cmdClientAdd(args: string[]): Promise<void> {
   out(`client_id:     ${result.clientId}`);
   if (result.clientSecret !== undefined) out(`client_secret: ${result.clientSecret}   <-- shown once, store it now`);
   out('\nEnter these under "Advanced settings" when adding the custom connector.');
+}
+
+async function cmdClientList(): Promise<void> {
+  const rows = await listClients();
+  if (rows.length === 0) {
+    out('no clients yet - register one with: client:add "<name>" <redirect_uri>');
+    return;
+  }
+  out('CLIENT_ID                             NAME                          STATE     SECRET  SESSIONS  LAST SIGN-IN');
+  for (const r of rows) {
+    out(
+      `${r.client_id.padEnd(37)} ${r.client_name.slice(0, 29).padEnd(29)} ` +
+        `${(r.disabled_at !== null ? 'disabled' : 'active').padEnd(9)} ${(r.has_secret ? 'yes' : '-').padEnd(7)} ` +
+        `${String(r.live_sessions).padEnd(9)} ${r.last_sign_in !== null ? r.last_sign_in.toISOString().slice(0, 16).replace('T', ' ') : '-'}`,
+    );
+    out(`  redirect: ${r.redirect_uris.join(', ')}`);
+  }
+}
+
+async function cmdClientDisable(args: string[]): Promise<void> {
+  const clientId = args[0];
+  if (clientId === undefined) throw new Error('usage: client:disable <client_id>   (see client:list)');
+  const res = await disableClient(clientId);
+  if (res === undefined) throw new Error(`no enabled client with id ${clientId} (see client:list)`);
+  await audit.write({
+    event: 'token_revoked',
+    ctx: { requestId: audit.newRequestId(), userId: 'cli' },
+    outcome: 'client_disabled',
+    detail: { client_id: clientId, client_name: res.name, refresh_tokens: res.revoked },
+  });
+  out(`disabled "${res.name}" and revoked ${res.revoked} refresh token(s).`);
+  out(`Access tokens it already holds stop working within ${Math.round(cfg.ACCESS_TOKEN_TTL_SECONDS / 60)} min.`);
+  out('To cut those off at once as well, use tokens:revoke-all (signs EVERY client out).');
+}
+
+async function cmdClientEnable(args: string[]): Promise<void> {
+  const clientId = args[0];
+  if (clientId === undefined) throw new Error('usage: client:enable <client_id>');
+  const res = await enableClient(clientId);
+  if (res === undefined) throw new Error(`no disabled client with id ${clientId} (see client:list)`);
+  await audit.write({
+    event: 'admin_action',
+    ctx: { requestId: audit.newRequestId(), userId: 'cli' },
+    outcome: 'client_enabled',
+    detail: { client_id: clientId, client_name: res.name },
+  });
+  out(`enabled "${res.name}". Its users sign in again.`);
 }
 
 /** S8 kill switch. */
@@ -923,6 +973,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   'user:password': cmdUserPassword,
   'user:list': async () => cmdUserList(),
   'client:add': cmdClientAdd,
+  'client:list': async () => cmdClientList(),
+  'client:disable': cmdClientDisable,
+  'client:enable': cmdClientEnable,
   'tokens:revoke-all': cmdRevokeAll,
   'audit:export': cmdAuditExport,
   'audit:summary': cmdAuditSummary,

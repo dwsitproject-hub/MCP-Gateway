@@ -10,6 +10,7 @@
 import type { ToolDefinition, InputShape } from './types.js';
 import { getContract } from './getContract.js';
 import { outstanding } from './outstanding.js';
+import { outstandingBreakdown } from './outstandingBreakdown.js';
 import { paymentStatus } from './paymentStatus.js';
 import { qualitySurveys } from './qualitySurveys.js';
 import { oilLoss } from './oilLoss.js';
@@ -29,6 +30,7 @@ export const klipTools: ReadonlyArray<ToolDefinition<any>> = [
   priceSummary,
   getContract,
   outstanding,
+  outstandingBreakdown,
   shipmentStatus,
   truckingOps,
   qualitySurveys,
