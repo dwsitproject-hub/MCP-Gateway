@@ -19,6 +19,7 @@ import { jettyTankFarm } from './tankFarm.js';
 import { jettyVesselCrosscheck } from './vesselCrosscheck.js';
 import { jettyVoyageHistory } from './voyageHistory.js';
 import { jettyBerthProductivity } from './berthProductivity.js';
+import { jettyLiveBoard } from './liveBoard.js';
 
 /** Every jetty tool, whether or not this deployment can reach JPS. */
 export const allJettyTools: ReadonlyArray<ToolDefinition<InputShape>> = [
@@ -27,6 +28,7 @@ export const allJettyTools: ReadonlyArray<ToolDefinition<InputShape>> = [
   jettyVesselCrosscheck as unknown as ToolDefinition<InputShape>,
   jettyVoyageHistory as unknown as ToolDefinition<InputShape>,
   jettyBerthProductivity as unknown as ToolDefinition<InputShape>,
+  jettyLiveBoard as unknown as ToolDefinition<InputShape>,
 ];
 
 /** What this deployment actually exposes. */

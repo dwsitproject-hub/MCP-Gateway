@@ -194,10 +194,16 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
     const data: Record<string, unknown> = {
       on_going: cohortStats(going, false),
       completed: cohortStats(done, true),
+      // Corrected 21 Oct 2026 from the KLIP source (shippingPerformance.service.ts, deltas via
+      // diffCalendarDays): each figure is one milestone date minus another, e.g.
+      // load_eta_arrival - load_eta_berthed. The earlier note read the sign as early/late.
       sign_note:
-        'Averages are SIGNED. Negative means the event happened before the estimate; positive means ' +
-        'after. The KLIP Shipping Performance page displays magnitudes only, so its cards show a ' +
-        'positive number where these show a negative one. Do not describe a negative figure as a delay.',
+        'These are DURATIONS between milestones, not lateness against a plan. KLIP subtracts the later ' +
+        'milestone from the earlier one for each port segment (arrival to berth, berth to complete), so ' +
+        'those values are usually negative and their size is the length of the interval in days; ' +
+        'load_readiness is arrival minus cargo readiness. The KLIP page shows the size without the sign, ' +
+        'and its total is the sum of the five segments. Never describe a negative figure as early or a ' +
+        'positive one as late: KLIP measures lateness separately, against the delivery end date.',
       coverage_note:
         'Each average covers only shipments carrying that measurement - see measured_on beside every ' +
         'figure, typically a third to a half of the cohort. A shipment without a measurement is ' +

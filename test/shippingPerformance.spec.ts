@@ -80,14 +80,16 @@ describe('the two cohorts', () => {
 });
 
 describe('what it refuses to flatten', () => {
-  it('keeps the SIGN the page throws away', async () => {
-    // The page renders "2 days" where the data holds -2, and most deltas are negative -
-    // events BEFORE estimate. A fleet running early and one running late must not read
-    // the same.
+  it("keeps KLIP's signed values and says they are durations, not lateness", async () => {
+    // The page renders "2 days" where the data holds -2. Corrected 21 Oct 2026 from the KLIP
+    // source: each figure is one milestone date minus a later one (e.g. load_eta_arrival -
+    // load_eta_berthed), so -2 is a 2-day interval - not "2 days early". The values pass
+    // through unchanged; only the reading of them was wrong.
     const d = await run();
     expect(d.on_going.load_arrival_to_berth.days).toBe(-2);
     expect(d.completed.discharge_berth_to_complete.days).toBe(-7);
-    expect(String(d.sign_note)).toMatch(/Do not describe a negative figure as a delay/i);
+    expect(String(d.sign_note)).toMatch(/DURATIONS between milestones, not lateness/);
+    expect(String(d.sign_note)).toMatch(/Never describe a negative figure as early/);
   });
 
   it('averages only over shipments carrying the measurement, and says how many', async () => {

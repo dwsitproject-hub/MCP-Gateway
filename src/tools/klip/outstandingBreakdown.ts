@@ -57,16 +57,35 @@ const inputShape = {
     .default('plant_incoterm')
     .describe('Split by plant, by incoterm, or both (one row per plant and incoterm that has contracts).'),
   include_empty: z.boolean().default(false).describe('Also list cells whose open and close outstanding are both zero.'),
+  all_time: z
+    .boolean()
+    .default(false)
+    .describe('Count every contract ever. Default false: year to date, the window the KLIP page shows.'),
 };
 
-function aggPath(filters: { plant?: string | null; product?: string | undefined; incoterm?: string | null }): string {
+/**
+ * Year to date in WIB, as klip_performance_summary and the KLIP page use. With scope=filtered
+ * and no dates KLIP applies NO window, so a breakdown without these reported all-time
+ * figures beside a page showing year-to-date ones (CPO 475,367 vs 417,369 MT, 10 Sep 2026).
+ */
+function ytdWindow(now = Date.now()): { from: string; to: string } {
+  const wib = new Date(now + 7 * 60 * 60 * 1000);
+  const to = wib.toISOString().slice(0, 10);
+  return { from: `${to.slice(0, 4)}-01-01`, to };
+}
+
+function aggPath(
+  filters: { plant?: string | null; product?: string | undefined; incoterm?: string | null },
+  window?: { from: string; to: string },
+): string {
   const agg = routes.latePerformanceSummary;
   const q: Record<string, string> = {};
+  if (window !== undefined) { q[agg.params.dateFrom] = window.from; q[agg.params.dateTo] = window.to; }
   if (filters.plant) q[agg.params.plant] = filters.plant;
   if (filters.product) q[agg.params.product] = filters.product;
   if (filters.incoterm) q[agg.params.incoterm] = filters.incoterm;
   // Without scope=filtered KLIP answers the unfiltered question under the caller's filter.
-  if (Object.keys(q).length > 0) q[agg.params.scope] = 'filtered';
+  if (filters.plant || filters.product || filters.incoterm) q[agg.params.scope] = 'filtered';
   return Object.keys(q).length === 0 ? agg.path : `${agg.path}?${new URLSearchParams(q).toString()}`;
 }
 
@@ -105,9 +124,10 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
   async handler(params): Promise<ToolOutcome> {
     await assertFiltersRecognised({ product: params.product });
     const calls: CallRecord[] = [];
+    const window = params.all_time ? undefined : ytdWindow();
 
     const cached = await cache.through(
-      cache.keyFor('klip_outstanding_breakdown', { product: params.product, by: params.by }),
+      cache.keyFor('klip_outstanding_breakdown', { product: params.product, by: params.by, from: window?.from, to: window?.to }),
       async () => {
         // 1) Which plants and incoterms actually have contracts for this product.
         const filters = buildFilters(routes.contracts, { product: params.product });
@@ -128,9 +148,9 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
         const asked = all.slice(0, MAX_CELLS);
 
         // 2) KLIP's aggregate for the whole, then for each cell.
-        const whole = await fetchOne<KlipSummary>(aggPath({ product: params.product }), routes.latePerformanceSummary.rowsPath, calls).catch(() => undefined);
+        const whole = await fetchOne<KlipSummary>(aggPath({ product: params.product }, window), routes.latePerformanceSummary.rowsPath, calls).catch(() => undefined);
         const cells = await mapLimit(asked, CONCURRENCY, async (c) =>
-          toCell(c.plant, c.incoterm, await fetchOne<KlipSummary>(aggPath({ ...c, product: params.product }), routes.latePerformanceSummary.rowsPath, calls).catch(() => undefined)),
+          toCell(c.plant, c.incoterm, await fetchOne<KlipSummary>(aggPath({ ...c, product: params.product }, window), routes.latePerformanceSummary.rowsPath, calls).catch(() => undefined)),
         );
         return {
           whole: toCell(null, null, whole),
@@ -165,6 +185,7 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
     const data: Record<string, unknown> = {
       product: params.product ?? 'all products',
       split_by: params.by,
+      period: window ? `Year to date, ${window.from} to ${window.to} - the window the KLIP page uses by default.` : 'All time (every contract ever), as asked.',
       total: v.wholeAvailable
         ? { open_outstanding_mt: v.whole.open_outstanding_mt, close_outstanding_mt: v.whole.close_outstanding_mt, late_contracts: v.whole.late_contracts }
         : null,

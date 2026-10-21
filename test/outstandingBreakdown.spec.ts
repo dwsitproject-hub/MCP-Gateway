@@ -84,6 +84,16 @@ describe('klip_outstanding_breakdown', () => {
     expect(data.reconciliation.note).toMatch(/do not adjust/);
   });
 
+  it('defaults to year to date, like the KLIP page, and sends no dates when all_time is asked', async () => {
+    await run({ by: 'plant' });
+    const year = new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 4);
+    for (const c of summaryCalls()) expect(c.query.dateFrom).toBe(`${year}-01-01`);
+    state.requests.length = 0; cache.clear();
+    const out = await run({ by: 'plant', all_time: true });
+    for (const c of summaryCalls()) expect(c.query.dateFrom).toBeUndefined();
+    expect((out.data as { period: string }).period).toMatch(/All time/);
+  });
+
   it('refuses a product KLIP does not know, before any aggregate call', async () => {
     await expect(run({ product: 'Unobtainium' })).rejects.toThrow();
     expect(summaryCalls()).toHaveLength(0);

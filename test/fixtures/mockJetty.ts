@@ -24,6 +24,8 @@ export interface MockJettyState {
    * sent an array. Both are in the wild, so both are testable.
    */
   cargoShape: 'object' | 'array';
+  /** Stale plans with an ETA in the past and no TA, appended to /shipment-plans. */
+  staleOverduePlans?: number;
   /** Per-vessel gauge state, distinct from the port-level ATG health. */
   gaugeConnected: boolean;
   /**
@@ -173,6 +175,39 @@ export function createMockJetty(state: MockJettyState): Express {
         '902': null,
       },
     });
+  });
+
+  // The Live Ops board's plan list, called with NO params (a date window would hide overdue ETAs).
+  // One case per dashboard rule: waiting, arriving inside the window, overdue, outside the window,
+  // no-ETA-but-ETB, rejected, and already alongside or sailed.
+  app.get('/api/v1/shipment-plans', (req: Request, res: Response) => {
+    if (!requireBearer(req, res)) return;
+    const h = (n: number) => new Date(Date.now() + n * 3_600_000).toISOString();
+    const si = (short: string, qty: number) => [{ breakdown: [{ commodityName: short + ' long', commodityShortName: short, qty, metricCode: 'MT' }] }];
+    res.json([
+      { id: 1, vesselName: 'BG WAITING ONE', agentName: 'PAAM', vesselCapacity: 2500, jettyName: 'Jetty 5', ta: h(-240), tb: null, etb: h(24), purposeCode: 'Unloading', approvalStatus: 'Draft', shippingInstructions: si('COAL', 2400) },
+      { id: 2, vesselName: 'MT ARRIVING SOON', agentName: 'TPB', vesselCapacity: 9000, jettyName: 'Jetty 2B', eta: h(10), ta: null, tb: null, purposeCode: 'Loading', approvalStatus: 'Submitted', shippingInstructions: si('FAME', 8800) },
+      { id: 3, vesselName: 'MT OVERDUE ETA', agentName: 'TPB', vesselCapacity: 5000, eta: h(-60), ta: null, tb: null, purposeCode: 'Loading', approvalStatus: 'Draft', shippingInstructions: si('FAME', 5000) },
+      { id: 4, vesselName: 'MV FAR AWAY', eta: h(24 * 10), ta: null, tb: null, purposeCode: 'Loading', approvalStatus: 'Approved', shippingInstructions: [] },
+      { id: 5, vesselName: 'BG NO ETA', eta: null, etb: h(30), ta: null, tb: null, purposeCode: 'Unloading', approvalStatus: 'Approved', shippingInstructions: si('CPO', 3000) },
+      { id: 6, vesselName: 'BG REJECTED', eta: h(5), ta: null, tb: null, purposeCode: 'Loading', approvalStatus: 'Rejected', shippingInstructions: [] },
+      { id: 7, vesselName: 'BG ALONGSIDE', ta: h(-30), tb: h(-20), purposeCode: 'Loading', approvalStatus: 'Approved', shippingInstructions: [] },
+      ...Array.from({ length: state.staleOverduePlans ?? 0 }, (_, i) => (
+        { id: 1000 + i, vesselName: `MT STALE ${i}`, eta: h(-24 * (100 + i)), ta: null, tb: null, purposeCode: 'Loading', approvalStatus: 'Draft', shippingInstructions: [] })),
+    ]);
+  });
+
+  // Sailed in the last 72 h (the board's Sailed tile); two rows for one plan count once.
+  app.get('/api/v1/operations', (req: Request, res: Response) => {
+    if (!requireBearer(req, res)) return;
+    const h = (n: number) => new Date(Date.now() + n * 3_600_000).toISOString();
+    if (req.query.status !== 'SAILED') { res.json([]); return; }
+    res.json([
+      { id: 801, shipmentPlanId: 50, status: 'SAILED', castOffAt: h(-10) },
+      { id: 802, shipmentPlanId: 50, status: 'SAILED', castOffAt: h(-10) },
+      { id: 803, shipmentPlanId: 51, status: 'SAILED', castOffAt: h(-30) },
+      { id: 804, shipmentPlanId: 52, status: 'SAILED', castOffAt: h(-100) },
+    ]);
   });
 
   app.get('/api/v1/dashboard-v2/atg-sync-health', (req: Request, res: Response) => {
