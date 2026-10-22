@@ -17,13 +17,13 @@ Both upstreams are on **production** as of 14–16 Sep 2026.
 
 ## 1. What it exposes
 
-**32 tools.** Every one read-only toward its upstream except one: `dwshub_set_sentinel_model`
+**31 tools.** Every one read-only toward its upstream except one: `dwshub_set_sentinel_model`
 changes a single DWS Hub setting, behind its own key and admin-only. The four knowledge
 tools that write touch only the gateway's own Postgres.
 
 | Family | Tools |
 |---|---|
-| **KLIP** (16) | `klip_search_contracts` `klip_get_contract` `klip_outstanding` `klip_outstanding_breakdown` `klip_top_contracts` `klip_unassigned_outstanding` `klip_shipment_status` `klip_shipping_performance` `klip_performance_summary` `klip_price_summary` `klip_oil_loss` `klip_trucking_ops` `klip_quality_surveys` `klip_payment_status` `klip_sap_import_status` `klip_reference` |
+| **KLIP** (15) | `klip_search_contracts` `klip_get_contract` `klip_outstanding` `klip_outstanding_breakdown` `klip_top_contracts` `klip_shipment_status` `klip_shipping_performance` `klip_performance_summary` `klip_price_summary` `klip_oil_loss` `klip_trucking_ops` `klip_quality_surveys` `klip_payment_status` `klip_sap_import_status` `klip_reference` |
 | **JPS** (6) | `jetty_live_board` `jetty_at_berth` `jetty_voyage_history` `jetty_berth_productivity` `jetty_tank_farm` `jetty_vessel_crosscheck` |
 | **DWS Hub** (5 + 1 write, admins only) | `dwshub_app_health` `dwshub_sentinel_findings` `dwshub_sentinel_detail` `dwshub_bug_reports` `dwshub_error_trends`, and `dwshub_set_sentinel_model` (the one write) |
 | **Gateway-local** (4) | `klip_knowledge_search` `klip_knowledge_save` `klip_knowledge_feedback` `klip_report_gap` |
@@ -97,7 +97,7 @@ src/
                errors, knowledge, gaps
   adapters/klip/   routes · fields · client(guard) · session · paginate · normalize
   adapters/jetty/  routes · client(GET-only) · session(cookie login)
-  tools/klip/      16 read-only tools + shared parameter plumbing
+  tools/klip/      15 read-only tools + shared parameter plumbing
   tools/jetty/     6 read-only tools
   tools/knowledge/ 4 gateway-local tools (memory + gap log)
   mcp/         server, envelope, runner
@@ -108,7 +108,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          44 suites, 492 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
+test/          44 suites, 491 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -160,7 +160,14 @@ check, and nothing will remind you).
 ## 6. Where numbers come from
 
 The standing rule: **the source system owns the figure.** Report it, never publish a
-rival beside it. Four consequences visible in the code:
+rival beside it. For KLIP this is absolute (Jerry, 22 Oct 2026: *everything is based on
+one source, KLIP*): a tool may filter KLIP's rows and put them in order, but it does not
+total, average or apportion its own version of a figure KLIP shows. That is why
+`klip_top_contracts` ranks contracts but sends supplier questions to KLIP's own supplier
+figure, why `top_vessels` shows each vessel's KLIP row instead of a gateway average, and
+why "outstanding with no vessel" waits for KLIP's own figure
+(`/shipments/performance/summary`, or the Shipments Unplanned card) rather than a
+gateway total. Four consequences visible in the code:
 
 - **Units are measured, not assumed.** JPS labels only `observedDensityKgM3`, so
   `jetty_tank_farm` derives what the volume and mass columns are in from
@@ -351,7 +358,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 44 suites, 492 tests
+npm test     # 44 suites, 491 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

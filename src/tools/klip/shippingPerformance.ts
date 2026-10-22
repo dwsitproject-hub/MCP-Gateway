@@ -62,7 +62,7 @@ const inputShape = {
   rank_by: z
     .enum(['none', 'total_days', 'outstanding'])
     .default('none')
-    .describe('Order the shipments before the limit is applied: "total_days" = longest total duration first, "outstanding" = most outstanding first, "none" = KLIP order. Ranking covers every shipment fetched, not just the first page.'),
+    .describe('Order the shipments before the limit is applied: "total_days" = largest KLIP Total first (its size, as the page shows it - not a voyage length), "outstanding" = most outstanding first, "none" = KLIP order. Ranking covers every shipment fetched, not just the first page.'),
 };
 
 /** Signed mean with its denominator. Never a mean over absent values. */
@@ -145,8 +145,8 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       'so port segments are usually negative; the page shows the size without the sign. KLIP\'s total also adds ' +
       'load readiness (arrival minus cargo readiness), usually POSITIVE, so the total is KLIP\'s Total column, ' +
       'not the length of the voyage. Use rank_by to rank across every shipment fetched; with rank_by, ' +
-      'top_vessels gives one line per vessel the way the page\'s By Vessel view does - use it for "top N vessels". ' +
-      'Contracts with no shipment at all are not voyages and are left out (see klip_unassigned_outstanding). ' +
+      'top_vessels gives one line per vessel (its highest-ranked shipment, KLIP figures as reported) - use it for ' +
+      '"top N vessels". Contracts with no shipment at all are not voyages and are left out. ' +
       'Roughly a third to a half of shipments carry each measurement, so every average is reported with ' +
       'the count behind it and must be quoted with that count.',
     `Returns at most ${CAP} shipments plus per-cohort averages. This endpoint has no pagination and ` +
@@ -214,38 +214,26 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       : wanted;
     const shipments = ordered.slice(0, limit).map((r) => mapRow(r, f));
 
-    // One line per VESSEL, the page's By Vessel rules: named vessels only, the day figure
-    // averaged over the vessel's shipments, outstanding summed from KLIP's apportioned
-    // outstanding_qty_aggregate (the per-row outstanding repeats on every STO of a contract).
-    // Ranking shipment rows alone let one ship fill a "top 3" with three of its STOs.
+    // One line per VESSEL: each named vessel's highest-ranked shipment, with KLIP's own figures
+    // for that shipment. Ranking rows alone let one ship fill a "top 3" with three of its STOs.
+    // Nothing is averaged or summed here - KLIP is the one source, and a per-vessel average or
+    // total computed by the gateway would be a second figure beside KLIP's.
     let topVessels: Array<Record<string, unknown>> | undefined;
     if (params.rank_by !== 'none') {
-      const groups = new Map<string, Row[]>();
-      for (const r of wanted) {
-        const name = (pickString(r, f.vesselName) ?? '').trim();
-        if (name === '') continue;
-        const key = name.toUpperCase();
-        groups.set(key, [...(groups.get(key) ?? []), r]);
+      const seen = new Map<string, number>();
+      for (const r of ordered) {
+        const name = (pickString(r, f.vesselName) ?? '').trim().toUpperCase();
+        if (name !== '') seen.set(name, (seen.get(name) ?? 0) + 1);
       }
-      topVessels = [...groups.values()]
-        .map((rows) => {
-          const totals = rows.map(totalRaw).filter((v): v is number => v !== null);
-          const os = rows.reduce((s, r) => s + (pickNumber(r, f.outstandingQtyAggregate) ?? 0), 0);
-          return {
-            vessel_name: pickString(rows[0] as Row, f.vesselName),
-            shipments: rows.length,
-            plants: [...new Set(rows.map((r) => pickString(r, f.plant)).filter(Boolean))],
-            avg_total_days: totals.length === 0 ? null : Math.round((totals.reduce((s, v) => s + v, 0) / totals.length) * 10) / 10,
-            total_measured_on: totals.length,
-            outstanding_mt: kgToMt(os),
-          };
-        })
-        .sort((a, b) =>
-          params.rank_by === 'total_days'
-            ? Math.abs(b.avg_total_days ?? -1) - Math.abs(a.avg_total_days ?? -1)
-            : (b.outstanding_mt ?? -1) - (a.outstanding_mt ?? -1),
-        )
-        .slice(0, limit);
+      const shown = new Set<string>();
+      topVessels = [];
+      for (const r of ordered) {
+        const name = (pickString(r, f.vesselName) ?? '').trim().toUpperCase();
+        if (name === '' || shown.has(name)) continue;
+        shown.add(name);
+        topVessels.push({ ...mapRow(r, f), shipments_on_this_vessel: seen.get(name) ?? 1 });
+        if (topVessels.length >= limit) break;
+      }
     }
 
     const data: Record<string, unknown> = {
@@ -278,9 +266,9 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       ...(topVessels === undefined ? {} : {
         top_vessels: topVessels,
         top_vessels_note:
-          'One line per vessel, as the page\'s By Vessel view: avg_total_days is the average of KLIP\'s Total ' +
-          'over that vessel\'s shipments (measured on total_measured_on of them), outstanding_mt the sum of ' +
-          'KLIP\'s apportioned outstanding. Unnamed shipments are left out. Use this, not shipments, for "top N vessels".',
+          'One line per vessel: its highest-ranked shipment, with the KLIP figures for that shipment exactly as ' +
+          'KLIP reports them, and how many shipments the vessel has here. Nothing is averaged or summed. Unnamed ' +
+          'shipments are left out. Use this, not shipments, for "top N vessels".',
       }),
       contracts_without_shipment_excluded: backlogExcluded,
       not_available:

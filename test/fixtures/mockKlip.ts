@@ -1052,13 +1052,10 @@ export function createMockKlip(state: MockState): Express {
     // (KLIP's backlog arm: UNPLANNED, no vessel, one row per contract) and a long on-going voyage.
     if (state.perfExtras) {
       const extra = [
-        { ...rows[2], id: 'SP-4', shipment_id: null, sto_number: null, sto_key: null, contract_number: '9000000001', supplier: 'BACKLOG SUPPLIER PT.', product: 'CPO', plant_site: 'TJP', vessel_name: null, status: 'UNPLANNED', contract_qty: 800_000, sto_qty: null, outstanding_qty: 750_000, outstanding_qty_aggregate: 750_000, total_delta_days: null },
-        { ...rows[1], id: 'SP-5', shipment_id: '1006019299', sto_number: '1006019299', sto_key: '1006019299', vessel_name: 'MT. LONG HAUL', status: 'AT_DISCHARGE_PORT', outstanding_qty: 900_000, outstanding_qty_aggregate: 400_000, total_delta_days: -15 },
+        { ...rows[2], id: 'SP-4', shipment_id: null, sto_number: null, sto_key: null, contract_number: '9000000001', supplier: 'BACKLOG SUPPLIER PT.', product: 'CPO', plant_site: 'TJP', vessel_name: null, status: 'UNPLANNED', contract_qty: 800_000, sto_qty: null, outstanding_qty: 750_000, total_delta_days: null },
+        { ...rows[1], id: 'SP-5', shipment_id: '1006019299', sto_number: '1006019299', sto_key: '1006019299', vessel_name: 'MT. LONG HAUL', status: 'AT_DISCHARGE_PORT', outstanding_qty: 900_000, total_delta_days: -15 },
         // A second STO on the same ship: a vessel ranking must show the ship once, not twice.
-        { ...rows[1], id: 'SP-6', shipment_id: '1006019300', sto_number: '1006019300', sto_key: '1006019300', vessel_name: 'MT. LONG HAUL', status: 'AT_DISCHARGE_PORT', outstanding_qty: 900_000, outstanding_qty_aggregate: 200_000, total_delta_days: -13 },
-        // Planned with no vessel: the contract figure repeats (1,000 t) and sto_qty is 400 t, but the
-        // summable outstanding KLIP apportions to this STO is 300 t.
-        { ...rows[2], id: 'SP-7', shipment_id: '1006019301', sto_number: null, sto_key: '1006019301', vessel_name: null, status: 'PLANNED', sto_qty: 400_000, outstanding_qty: 1_000_000, outstanding_qty_aggregate: 300_000 },
+        { ...rows[1], id: 'SP-6', shipment_id: '1006019300', sto_number: '1006019300', sto_key: '1006019300', vessel_name: 'MT. LONG HAUL', status: 'AT_DISCHARGE_PORT', outstanding_qty: 900_000, total_delta_days: -13 },
       ];
       rows.push(...(extra as typeof rows));
     }

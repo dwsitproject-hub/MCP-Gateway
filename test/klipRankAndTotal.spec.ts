@@ -1,8 +1,7 @@
 /**
- * Ranking and totalling done by the gateway itself, with no new KLIP request options:
+ * Ranking done by the gateway, with no new KLIP request options - and no totals: KLIP is the
+ * one source, so every figure returned is KLIP's own, only put in order:
  *   - klip_top_contracts ranks open contracts by KLIP's own outstanding, with contract date;
- *   - klip_unassigned_outstanding totals, per plant, contracts with no shipment plus the STO
- *     quantity of shipments with no vessel - never the repeated per-STO outstanding;
  *   - klip_shipping_performance leaves no-shipment contracts out of the voyage figures and
  *     ranks across every shipment fetched before applying the limit.
  */
@@ -17,7 +16,6 @@ let server: Server;
 let state: MockState;
 type Mods = {
   top: (typeof import('../src/tools/klip/topContracts.js'))['topContracts'];
-  unassigned: (typeof import('../src/tools/klip/unassignedOutstanding.js'))['unassignedOutstanding'];
   perf: (typeof import('../src/tools/klip/shippingPerformance.js'))['shippingPerformance'];
   cache: typeof import('../src/core/cache.js');
 };
@@ -41,7 +39,6 @@ beforeAll(async () => {
   ({ server } = await startMockKlip(PORT, state));
   m = {
     top: (await import('../src/tools/klip/topContracts.js')).topContracts,
-    unassigned: (await import('../src/tools/klip/unassignedOutstanding.js')).unassignedOutstanding,
     perf: (await import('../src/tools/klip/shippingPerformance.js')).shippingPerformance,
     cache: await import('../src/core/cache.js'),
   };
@@ -59,7 +56,9 @@ describe('klip_top_contracts', () => {
     expect(os.every((v: number) => v > 0)).toBe(true);
     const dates = d.contracts.map((c: any) => c.contract_date).filter(Boolean).sort();
     if (d.latest_contract && dates.length) expect(d.latest_contract.contract_date >= dates[0]).toBe(true);
-    expect(d.top_suppliers.length).toBeGreaterThan(0);
+    // No gateway totals beside KLIP's: suppliers are KLIP's own figure, from another tool.
+    expect(d.top_suppliers).toBeUndefined();
+    expect(d.suppliers).toMatch(/klip_performance_summary/);
   });
 
   it('sends the status filter upstream and fetches at KLIP\'s page maximum', async () => {
@@ -68,25 +67,6 @@ describe('klip_top_contracts', () => {
     const call = [...state.requests].reverse().find((r) => r.path === '/api/contracts');
     expect(call?.query.status).toBe('ACTIVE');
     expect(Number(call?.query.limit)).toBe(1000);
-  });
-});
-
-describe('klip_unassigned_outstanding', () => {
-  it('totals contracts with no shipment and shipments with no vessel, per plant', async () => {
-    const d = await run(m.unassigned as never, { product: 'CPO' });
-    const tjp = d.plants.find((p: any) => p.plant === 'TJP');
-    expect(tjp.not_on_any_shipment_mt).toBe(750);      // the backlog row's outstanding
-    expect(tjp.contracts_not_on_any_shipment).toBe(1);
-    // SP-7 is PLANNED with no vessel: KLIP's apportioned outstanding (300 MT) is counted - not its
-    // sto_qty (400) and not the contract figure that repeats on every STO (1,000).
-    expect(tjp.on_shipment_without_vessel_mt).toBe(300);
-    expect(tjp.shipments_without_vessel).toBe(1);
-    expect(tjp.without_vessel_mt).toBe(1050);
-    // SP-3 carries no apportioned outstanding: left out, and the result says so rather than
-    // falling back to the repeated per-row figure.
-    expect(d.rows_not_counted).toMatch(/^1 open shipment/);
-    expect(d.top_suppliers_not_on_any_shipment[0]).toEqual({ supplier: 'BACKLOG SUPPLIER PT.', outstanding_mt: 750 });
-    expect(d.plants.find((p: any) => p.plant === 'Bontang')).toBeUndefined();
   });
 });
 
@@ -104,12 +84,14 @@ describe('klip_shipping_performance', () => {
     expect(String(d.ranked_by)).toMatch(/every shipment fetched/);
   });
 
-  it('gives one line per vessel for a "top N vessels" question, as the page By Vessel view does', async () => {
+  it('gives one line per vessel for a "top N vessels" question, with KLIP figures only', async () => {
     // Ranking shipment rows alone let MT. LONG HAUL take two of the top three with two STOs.
     const d = await run(m.perf as never, { cohort: 'on_going', rank_by: 'total_days', limit: 3 });
     const names = d.top_vessels.map((v: any) => v.vessel_name);
     expect(new Set(names).size).toBe(names.length);
-    expect(d.top_vessels[0]).toMatchObject({ vessel_name: 'MT. LONG HAUL', shipments: 2, avg_total_days: -14, total_measured_on: 2, outstanding_mt: 600 });
+    // Its highest-ranked shipment, KLIP's own figure for it (-15), not an average of its two (-14).
+    expect(d.top_vessels[0]).toMatchObject({ vessel_name: 'MT. LONG HAUL', total_days: -15, shipments_on_this_vessel: 2 });
+    expect(d.top_vessels[0]).not.toHaveProperty('avg_total_days');
     expect(d.shipments.filter((s: any) => s.vessel_name === 'MT. LONG HAUL')).toHaveLength(2);
   });
 

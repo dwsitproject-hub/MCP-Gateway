@@ -379,13 +379,6 @@ export const fields = {
     deliveredQty: ['delivered_qty'],
     receivedQty: ['received_qty'],
     outstandingQty: ['outstanding_qty'],
-    /**
-     * The SUMMABLE outstanding: each PO's outstanding apportioned over its STOs, in SQL
-     * (Logistic SAP outstandingAggregateSql). outstanding_qty repeats the contract figure on
-     * every sibling STO; KLIP's own cards, drilldown and By Vessel sum this column instead
-     * (shippingPerformanceOutstandingAgg.ts). On backlog rows it equals the row's own outstanding.
-     */
-    outstandingQtyAggregate: ['outstanding_qty_aggregate'],
     /** Planned, loading side. */
     loadEtaArrival: ['loading_eta_arrival'],
     loadEtaBerthed: ['loading_eta_berthed'],

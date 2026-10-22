@@ -48,10 +48,11 @@ export const topContracts: ToolDefinition<typeof inputShape> = {
   cap: CAP,
   description: describe(
     'Contracts ranked by KLIP\'s own outstanding quantity (MT), largest first, with supplier, plant, incoterm and ' +
-      'contract date - plus the most recent contract that still has outstanding, and the suppliers holding the most ' +
-      'outstanding across the ranked set. Filter by product and plant; status defaults to Open. Use for "which ' +
-      'contracts/suppliers have the most outstanding". The ranking is computed over every matching contract read ' +
-      'from KLIP; if KLIP holds more than could be read, the result says so.',
+      'contract date - plus the most recent contract that still has outstanding. Filter by product and plant; status ' +
+      'defaults to Open. Use for "which contracts have the most outstanding". Every figure is KLIP\'s own, per ' +
+      'contract; this tool only puts them in order and totals nothing. For SUPPLIERS with the most outstanding use ' +
+      'klip_performance_summary with group_by supplier, which is KLIP\'s own supplier figure. The ranking covers every ' +
+      'matching contract read from KLIP; if KLIP holds more than could be read, the result says so.',
     `Returns at most ${CAP} contracts.`,
   ),
   inputShape,
@@ -91,31 +92,19 @@ export const topContracts: ToolDefinition<typeof inputShape> = {
 
     const ranked = [...rows].sort((a, b) => b.outstanding_mt - a.outstanding_mt);
     const latest = [...rows].filter((r) => r.contract_date !== null).sort((a, b) => String(b.contract_date).localeCompare(String(a.contract_date)))[0] ?? null;
-    const bySupplier = new Map<string, { outstanding_mt: number; contracts: number }>();
-    for (const r of rows) {
-      const k = r.supplier ?? '(no supplier)';
-      const s = bySupplier.get(k) ?? { outstanding_mt: 0, contracts: 0 };
-      s.outstanding_mt += r.outstanding_mt;
-      s.contracts += 1;
-      bySupplier.set(k, s);
-    }
-    const topSuppliers = [...bySupplier.entries()]
-      .map(([supplier, s]) => ({ supplier, outstanding_mt: Math.round(s.outstanding_mt * 1000) / 1000, contracts: s.contracts }))
-      .sort((a, b) => b.outstanding_mt - a.outstanding_mt)
-      .slice(0, 10);
+    // No supplier totals here: KLIP publishes its own supplier figure (Contract Performance),
+    // and a second one summed by the gateway would sit beside it and disagree. KLIP is the one
+    // source; klip_performance_summary group_by supplier reports KLIP's.
 
     const data: Record<string, unknown> = {
       filter: { product: params.product ?? 'all', plant: params.plant ?? 'all', status: params.status },
       contracts: ranked.slice(0, params.limit),
       latest_contract: latest,
-      top_suppliers: topSuppliers,
-      contracts_with_outstanding: rows.length,
+      ranked_from_contracts: rows.length,
       source:
         'KLIP /contracts rows; outstanding is KLIP\'s own outstanding_quantity per contract, converted from kg to MT. ' +
-        'Ranked here, because KLIP\'s own sort options are not yet verified for this connector.',
-      supplier_note:
-        'top_suppliers adds up the outstanding of the contracts listed by KLIP for this filter. For the supplier ' +
-        'breakdown KLIP\'s Contract Performance page shows, use klip_performance_summary with group_by supplier.',
+        'Ordered here, because KLIP\'s own sort options are not yet verified for this connector. Nothing is totalled.',
+      suppliers: 'For the suppliers with the most outstanding, use klip_performance_summary with group_by supplier - KLIP\'s own figure.',
     };
     if (walked.truncated) {
       data.coverage_warning =
