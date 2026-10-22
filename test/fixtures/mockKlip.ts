@@ -27,6 +27,8 @@ export interface MockState {
   /** Force the next N authorized calls to answer 401. */
   failAuthTimes: number;
   rejectCredentials: boolean;
+  /** Adds a no-shipment contract and a long voyage to /shipments/performance. */
+  perfExtras?: boolean;
 }
 
 const PLANTS = ['TJP', 'Sei Mangkei', 'Dumai'];
@@ -1046,6 +1048,15 @@ export function createMockKlip(state: MockState): Express {
       },
     ];
     const { plant } = req.query as Record<string, string | undefined>;
+    // Off by default so the original suites keep their counts: a contract with NO shipment
+    // (KLIP's backlog arm: UNPLANNED, no vessel, one row per contract) and a long on-going voyage.
+    if (state.perfExtras) {
+      const extra = [
+        { ...rows[2], id: 'SP-4', shipment_id: null, sto_number: null, sto_key: null, contract_number: '9000000001', supplier: 'BACKLOG SUPPLIER PT.', product: 'CPO', plant_site: 'TJP', vessel_name: null, status: 'UNPLANNED', contract_qty: 800_000, sto_qty: null, outstanding_qty: 750_000, total_delta_days: null },
+        { ...rows[1], id: 'SP-5', shipment_id: '1006019299', sto_number: '1006019299', sto_key: '1006019299', vessel_name: 'MT. LONG HAUL', status: 'AT_DISCHARGE_PORT', outstanding_qty: 900_000, total_delta_days: -15 },
+      ];
+      rows.push(...(extra as typeof rows));
+    }
     const out = plant === undefined ? rows : rows.filter((r) => r.plant_site.toLowerCase() === plant.toLowerCase());
     res.json({ success: true, data: out });
   });

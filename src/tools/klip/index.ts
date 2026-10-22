@@ -11,6 +11,8 @@ import type { ToolDefinition, InputShape } from './types.js';
 import { getContract } from './getContract.js';
 import { outstanding } from './outstanding.js';
 import { outstandingBreakdown } from './outstandingBreakdown.js';
+import { topContracts } from './topContracts.js';
+import { unassignedOutstanding } from './unassignedOutstanding.js';
 import { paymentStatus } from './paymentStatus.js';
 import { qualitySurveys } from './qualitySurveys.js';
 import { oilLoss } from './oilLoss.js';
@@ -31,6 +33,8 @@ export const klipTools: ReadonlyArray<ToolDefinition<any>> = [
   getContract,
   outstanding,
   outstandingBreakdown,
+  topContracts,
+  unassignedOutstanding,
   shipmentStatus,
   truckingOps,
   qualitySurveys,

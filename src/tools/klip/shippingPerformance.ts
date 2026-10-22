@@ -59,6 +59,10 @@ const inputShape = {
     .default('both')
     .describe('On-going voyages are measured against ESTIMATES, completed ones against ACTUALS.'),
   limit: z.number().int().min(1).max(CAP).default(15).describe(`How many shipments to return (max ${CAP}).`),
+  rank_by: z
+    .enum(['none', 'total_days', 'outstanding'])
+    .default('none')
+    .describe('Order the shipments before the limit is applied: "total_days" = longest total duration first, "outstanding" = most outstanding first, "none" = KLIP order. Ranking covers every shipment fetched, not just the first page.'),
 };
 
 /** Signed mean with its denominator. Never a mean over absent values. */
@@ -113,8 +117,8 @@ function mapRow(row: Row, f: typeof fields.shippingPerformance): Record<string, 
     freight: pickNumber(row, f.freight),
     fuel_consumption: pickNumber(row, f.fuelConsumption),
     cargo_readiness_date: toDateOnly(pickString(row, f.cargoReadiness)),
-    // The delta family that applies to THIS row's cohort. Signed: negative means the
-    // event happened before the estimate.
+    // The delta family that applies to THIS row's cohort: KLIP's milestone differences,
+    // i.e. durations (see sign_note), reported as KLIP holds them.
     load_readiness_days: pickNumber(row, completed ? f.ataLoadDeltaToReadiness : f.loadDeltaToReadiness),
     load_arrival_to_berth_days: pickNumber(row, completed ? f.ataLoadDeltaArrivalToBerth : f.loadDeltaArrivalToBerth),
     load_berth_to_complete_days: pickNumber(row, completed ? f.ataLoadDeltaBerthToComplete : f.loadDeltaBerthToComplete),
@@ -136,9 +140,11 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       'quantities and status. Filter by plant, vessel, product, supplier or contract. ' +
       'Use this for SHIPPING and vessel questions; klip_performance_summary is contract delivery ' +
       'lateness and knows nothing about voyages. ' +
-      'FIGURES ARE SIGNED: a negative average means the event happened BEFORE the estimate. The KLIP ' +
-      'page shows the magnitude only, so a number here may appear with the opposite sense to the page - ' +
-      'that is deliberate, because early and late are not the same result. ' +
+      'The day figures are DURATIONS between milestones (arrival to berth, berth to complete, at the loading ' +
+      'and discharge ports; the total is their sum), not lateness against a plan. KLIP subtracts the later ' +
+      'milestone from the earlier, so port segments are usually negative; the page shows the size without ' +
+      'the sign. Use rank_by to get the longest voyages or the most outstanding across every shipment fetched. ' +
+      'Contracts with no shipment at all are not voyages and are left out (see klip_unassigned_outstanding). ' +
       'Roughly a third to a half of shipments carry each measurement, so every average is reported with ' +
       'the count behind it and must be quoted with that count.',
     `Returns at most ${CAP} shipments plus per-cohort averages. This endpoint has no pagination and ` +
@@ -172,8 +178,15 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
     );
 
     const isDone = (r: Row): boolean => (pickString(r, f.status) ?? '').toUpperCase() === 'COMPLETED';
-    const going = matched.filter((r) => !isDone(r));
-    const done = matched.filter(isDone);
+    // KLIP appends one row per contract with NO shipment (status UNPLANNED, no vessel) to this
+    // endpoint's data. They are not voyages: KLIP's own averages leave them out, and counting
+    // them made "on going" include contracts nothing had been booked for.
+    const isBacklog = (r: Row): boolean =>
+      (pickString(r, f.status) ?? '').toUpperCase() === 'UNPLANNED' && (pickString(r, f.vesselName) ?? '').trim() === '';
+    const backlogExcluded = matched.filter(isBacklog).length;
+    const voyages = matched.filter((r) => !isBacklog(r));
+    const going = voyages.filter((r) => !isDone(r));
+    const done = voyages.filter(isDone);
 
     const cohortStats = (rows: readonly Row[], actual: boolean): Record<string, unknown> => ({
       shipments: rows.length,
@@ -188,8 +201,15 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
     });
 
     const wanted =
-      params.cohort === 'on_going' ? going : params.cohort === 'completed' ? done : matched;
-    const shipments = wanted.slice(0, limit).map((r) => mapRow(r, f));
+      params.cohort === 'on_going' ? going : params.cohort === 'completed' ? done : voyages;
+    // Ranking happens BEFORE the limit, over every shipment fetched - otherwise a "top 3"
+    // is only the top of whatever KLIP happened to return first.
+    const totalOf = (r: Row): number => Math.abs(pickNumber(r, isDone(r) ? f.ataTotalDeltaDays : f.totalDeltaDays) ?? -1);
+    const ordered =
+      params.rank_by === 'total_days' ? [...wanted].sort((a, b) => totalOf(b) - totalOf(a))
+      : params.rank_by === 'outstanding' ? [...wanted].sort((a, b) => (pickNumber(b, f.outstandingQty) ?? -1) - (pickNumber(a, f.outstandingQty) ?? -1))
+      : wanted;
+    const shipments = ordered.slice(0, limit).map((r) => mapRow(r, f));
 
     const data: Record<string, unknown> = {
       on_going: cohortStats(going, false),
@@ -214,6 +234,9 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
         'delta from the timestamps.',
       shipments,
       rows_shown: shipments.length,
+      ranked_by: params.rank_by === 'total_days' ? 'longest total duration first (size of total_days), over every shipment fetched'
+        : params.rank_by === 'outstanding' ? 'most outstanding first, over every shipment fetched' : 'KLIP order',
+      contracts_without_shipment_excluded: backlogExcluded,
       not_available:
         'Freight, fuel consumption, pump rate and sailing speed are empty for every shipment in KLIP ' +
         'staging, and shortage for all but a handful. The page has columns for them; there is no data ' +

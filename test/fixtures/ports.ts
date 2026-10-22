@@ -39,4 +39,5 @@ export const PORTS = {
   dwshubControl: 5210,
   outstandingBreakdown: 5211,
   jettyLiveBoard: 5212,
+  klipRankAndTotal: 5213,
 } as const;
