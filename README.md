@@ -17,15 +17,15 @@ Both upstreams are on **production** as of 14–16 Sep 2026.
 
 ## 1. What it exposes
 
-**28 tools.** Every one read-only toward its upstream except one: `dwshub_set_sentinel_model`
+**32 tools.** Every one read-only toward its upstream except one: `dwshub_set_sentinel_model`
 changes a single DWS Hub setting, behind its own key and admin-only. The four knowledge
 tools that write touch only the gateway's own Postgres.
 
 | Family | Tools |
 |---|---|
-| **KLIP** (13) | `klip_search_contracts` `klip_get_contract` `klip_outstanding` `klip_shipment_status` `klip_shipping_performance` `klip_performance_summary` `klip_price_summary` `klip_oil_loss` `klip_trucking_ops` `klip_quality_surveys` `klip_payment_status` `klip_sap_import_status` `klip_reference` |
-| **JPS** (5) | `jetty_at_berth` `jetty_voyage_history` `jetty_berth_productivity` `jetty_tank_farm` `jetty_vessel_crosscheck` |
-| **DWS Hub** (5, admins only) | `dwshub_app_health` `dwshub_sentinel_findings` `dwshub_sentinel_detail` `dwshub_bug_reports` `dwshub_error_trends` |
+| **KLIP** (16) | `klip_search_contracts` `klip_get_contract` `klip_outstanding` `klip_outstanding_breakdown` `klip_top_contracts` `klip_unassigned_outstanding` `klip_shipment_status` `klip_shipping_performance` `klip_performance_summary` `klip_price_summary` `klip_oil_loss` `klip_trucking_ops` `klip_quality_surveys` `klip_payment_status` `klip_sap_import_status` `klip_reference` |
+| **JPS** (6) | `jetty_live_board` `jetty_at_berth` `jetty_voyage_history` `jetty_berth_productivity` `jetty_tank_farm` `jetty_vessel_crosscheck` |
+| **DWS Hub** (5 + 1 write, admins only) | `dwshub_app_health` `dwshub_sentinel_findings` `dwshub_sentinel_detail` `dwshub_bug_reports` `dwshub_error_trends`, and `dwshub_set_sentinel_model` (the one write) |
 | **Gateway-local** (4) | `klip_knowledge_search` `klip_knowledge_save` `klip_knowledge_feedback` `klip_report_gap` |
 
 The JPS family is **empty when JPS is unconfigured**. Advertising a tool that always
@@ -97,8 +97,8 @@ src/
                errors, knowledge, gaps
   adapters/klip/   routes · fields · client(guard) · session · paginate · normalize
   adapters/jetty/  routes · client(GET-only) · session(cookie login)
-  tools/klip/      13 read-only tools + shared parameter plumbing
-  tools/jetty/     5 read-only tools
+  tools/klip/      16 read-only tools + shared parameter plumbing
+  tools/jetty/     6 read-only tools
   tools/knowledge/ 4 gateway-local tools (memory + gap log)
   mcp/         server, envelope, runner
   auth/        keys, hub(OIDC RP), users, clients, tokens, provider,
@@ -108,7 +108,7 @@ src/
 migrations/    001 schema · 002 Hub OIDC · 003 knowledge · 004-008,010 curated
                knowledge · 009 admin flag · 011 capability gaps
 deploy/        nginx config, backup sidecar
-test/          39 suites, 465 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
+test/          44 suites, 492 tests, with mock KLIP, mock JPS, mock Hub and mock DWS Hub API
 ```
 
 Layering rule (T-3): `tools → adapters → core`. Nothing imports `http/` except the
@@ -351,7 +351,7 @@ npx tsx src/index.ts
 ## 11. Tests
 
 ```bash
-npm test     # 39 suites, 465 tests
+npm test     # 44 suites, 492 tests
 ```
 
 Highlights rather than an inventory — the full list is the directory:

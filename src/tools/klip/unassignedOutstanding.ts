@@ -9,8 +9,10 @@
  *     outstanding_qty = the contract's remaining outstanding; Logistic SAP
  *     shippingPerformance.service.ts buildShippingPerformanceBacklogSql). Summable.
  *   ON A SHIPMENT WITH NO VESSEL - open shipment rows whose vessel_name is empty. Their
- *     sto_qty is summed, NOT outstanding_qty: on shipment rows outstanding is the CONTRACT's,
- *     repeated on every STO of the contract, so summing it would count a contract once per STO.
+ *     outstanding_qty_aggregate is summed: KLIP's own apportioned outstanding, the column its
+ *     cards, drilldown and By Vessel sum (shippingPerformanceOutstandingAgg.ts). NOT
+ *     outstanding_qty, which repeats the contract figure on every STO, and NOT sto_qty, which
+ *     is how much the STO carries, not how much is still owed.
  *
  * KLIP's Shipments page "Unplanned" card is computed by a different query and can differ;
  * this is what the Shipping Performance data says. The endpoint applies its own default
@@ -38,7 +40,8 @@ export const unassignedOutstanding: ToolDefinition<typeof inputShape> = {
   cap: 100,
   description: describe(
     'Outstanding quantity (MT) that has NO VESSEL yet, per plant, largest first, in two parts: contracts with no ' +
-      'shipment at all (their remaining outstanding), and shipments planned without a vessel (their STO quantity). ' +
+      'shipment at all (their remaining outstanding), and shipments planned without a vessel (their share of the ' +
+      'contract outstanding, as KLIP apportions it). ' +
       'Also the suppliers with the most outstanding not on any shipment. Filter by product and plant. ' +
       'Totalled by this connector from KLIP\'s Shipping Performance data; KLIP\'s Shipments page Unplanned card is ' +
       'computed differently and can differ.',
@@ -58,6 +61,7 @@ export const unassignedOutstanding: ToolDefinition<typeof inputShape> = {
     const walked = cached.value;
 
     const plants = new Map<string, { not_on_any_shipment_mt: number; contracts: number; on_shipment_without_vessel_mt: number; shipments_without_vessel: number }>();
+    let missingAggregate = 0;
     const suppliers = new Map<string, number>();
     for (const row of walked.rows) {
       if (!matchesLoosely(pickString(row, f.product), params.product)) continue;
@@ -74,9 +78,15 @@ export const unassignedOutstanding: ToolDefinition<typeof inputShape> = {
         const s = pickString(row, f.supplier) ?? '(no supplier)';
         suppliers.set(s, (suppliers.get(s) ?? 0) + os);
       } else if (vessel === '') {
-        const sto = kgToMt(pickNumber(row, f.stoQty)) ?? 0;
-        if (sto <= 0) continue;
-        p.on_shipment_without_vessel_mt += sto;
+        const raw = pickNumber(row, f.outstandingQtyAggregate);
+        if (raw === null) {
+          // Never substitute outstanding_qty here: it would count the contract once per STO.
+          missingAggregate += 1;
+          continue;
+        }
+        const os = kgToMt(raw) ?? 0;
+        if (os <= 0) continue;
+        p.on_shipment_without_vessel_mt += os;
         p.shipments_without_vessel += 1;
       } else continue;
       plants.set(plant, p);
@@ -102,10 +112,16 @@ export const unassignedOutstanding: ToolDefinition<typeof inputShape> = {
       top_suppliers_not_on_any_shipment: [...suppliers.entries()].map(([supplier, mt]) => ({ supplier, outstanding_mt: round(mt) })).sort((a, b) => b.outstanding_mt - a.outstanding_mt).slice(0, 10),
       method:
         'Totalled by this connector from KLIP Shipping Performance rows: contracts with no shipment (KLIP marks them ' +
-        'UNPLANNED, one row each, with their remaining outstanding) plus the STO quantity of open shipments with no ' +
-        'vessel named. Completed shipments are excluded. Outstanding on shipment rows is never summed - it repeats per STO.',
+        'UNPLANNED, one row each, with their remaining outstanding) plus, for open shipments with no vessel named, ' +
+        'the outstanding as KLIP apportions it per STO (outstanding_qty_aggregate, the column the KLIP cards sum). ' +
+        'Completed shipments are excluded. The per-row outstanding_qty is never summed - it repeats on every STO.',
       differs_from: 'KLIP\'s Shipments page Unplanned card is a different query and can show a different figure.',
     };
+    if (missingAggregate > 0) {
+      data.rows_not_counted =
+        `${missingAggregate} open shipment(s) with no vessel carried no apportioned outstanding and are not in the ` +
+        'totals; the total is low by their share.';
+    }
     if (perPlant.length === 0) data.empty_result_note = 'No outstanding without a vessel for this filter in the Shipping Performance data.';
 
     return {

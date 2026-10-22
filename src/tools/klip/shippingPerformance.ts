@@ -141,9 +141,11 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       'Use this for SHIPPING and vessel questions; klip_performance_summary is contract delivery ' +
       'lateness and knows nothing about voyages. ' +
       'The day figures are DURATIONS between milestones (arrival to berth, berth to complete, at the loading ' +
-      'and discharge ports; the total is their sum), not lateness against a plan. KLIP subtracts the later ' +
-      'milestone from the earlier, so port segments are usually negative; the page shows the size without ' +
-      'the sign. Use rank_by to get the longest voyages or the most outstanding across every shipment fetched. ' +
+      'and discharge ports), not lateness against a plan. KLIP subtracts the later milestone from the earlier, ' +
+      'so port segments are usually negative; the page shows the size without the sign. KLIP\'s total also adds ' +
+      'load readiness (arrival minus cargo readiness), usually POSITIVE, so the total is KLIP\'s Total column, ' +
+      'not the length of the voyage. Use rank_by to rank across every shipment fetched; with rank_by, ' +
+      'top_vessels gives one line per vessel the way the page\'s By Vessel view does - use it for "top N vessels". ' +
       'Contracts with no shipment at all are not voyages and are left out (see klip_unassigned_outstanding). ' +
       'Roughly a third to a half of shipments carry each measurement, so every average is reported with ' +
       'the count behind it and must be quoted with that count.',
@@ -204,12 +206,47 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
       params.cohort === 'on_going' ? going : params.cohort === 'completed' ? done : voyages;
     // Ranking happens BEFORE the limit, over every shipment fetched - otherwise a "top 3"
     // is only the top of whatever KLIP happened to return first.
-    const totalOf = (r: Row): number => Math.abs(pickNumber(r, isDone(r) ? f.ataTotalDeltaDays : f.totalDeltaDays) ?? -1);
+    const totalRaw = (r: Row): number | null => pickNumber(r, isDone(r) ? f.ataTotalDeltaDays : f.totalDeltaDays);
+    const totalOf = (r: Row): number => Math.abs(totalRaw(r) ?? -1);
     const ordered =
       params.rank_by === 'total_days' ? [...wanted].sort((a, b) => totalOf(b) - totalOf(a))
       : params.rank_by === 'outstanding' ? [...wanted].sort((a, b) => (pickNumber(b, f.outstandingQty) ?? -1) - (pickNumber(a, f.outstandingQty) ?? -1))
       : wanted;
     const shipments = ordered.slice(0, limit).map((r) => mapRow(r, f));
+
+    // One line per VESSEL, the page's By Vessel rules: named vessels only, the day figure
+    // averaged over the vessel's shipments, outstanding summed from KLIP's apportioned
+    // outstanding_qty_aggregate (the per-row outstanding repeats on every STO of a contract).
+    // Ranking shipment rows alone let one ship fill a "top 3" with three of its STOs.
+    let topVessels: Array<Record<string, unknown>> | undefined;
+    if (params.rank_by !== 'none') {
+      const groups = new Map<string, Row[]>();
+      for (const r of wanted) {
+        const name = (pickString(r, f.vesselName) ?? '').trim();
+        if (name === '') continue;
+        const key = name.toUpperCase();
+        groups.set(key, [...(groups.get(key) ?? []), r]);
+      }
+      topVessels = [...groups.values()]
+        .map((rows) => {
+          const totals = rows.map(totalRaw).filter((v): v is number => v !== null);
+          const os = rows.reduce((s, r) => s + (pickNumber(r, f.outstandingQtyAggregate) ?? 0), 0);
+          return {
+            vessel_name: pickString(rows[0] as Row, f.vesselName),
+            shipments: rows.length,
+            plants: [...new Set(rows.map((r) => pickString(r, f.plant)).filter(Boolean))],
+            avg_total_days: totals.length === 0 ? null : Math.round((totals.reduce((s, v) => s + v, 0) / totals.length) * 10) / 10,
+            total_measured_on: totals.length,
+            outstanding_mt: kgToMt(os),
+          };
+        })
+        .sort((a, b) =>
+          params.rank_by === 'total_days'
+            ? Math.abs(b.avg_total_days ?? -1) - Math.abs(a.avg_total_days ?? -1)
+            : (b.outstanding_mt ?? -1) - (a.outstanding_mt ?? -1),
+        )
+        .slice(0, limit);
+    }
 
     const data: Record<string, unknown> = {
       on_going: cohortStats(going, false),
@@ -222,7 +259,9 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
         'milestone from the earlier one for each port segment (arrival to berth, berth to complete), so ' +
         'those values are usually negative and their size is the length of the interval in days; ' +
         'load_readiness is arrival minus cargo readiness. The KLIP page shows the size without the sign, ' +
-        'and its total is the sum of the five segments. Never describe a negative figure as early or a ' +
+        'and its total is the sum of the five segments - readiness usually positive, the port segments ' +
+        'usually negative - so the total is KLIP\'s Total column, not the length of the voyage. Quote it as ' +
+        'KLIP\'s total, never as a voyage duration. Never describe a negative figure as early or a ' +
         'positive one as late: KLIP measures lateness separately, against the delivery end date.',
       coverage_note:
         'Each average covers only shipments carrying that measurement - see measured_on beside every ' +
@@ -234,8 +273,15 @@ export const shippingPerformance: ToolDefinition<typeof inputShape> = {
         'delta from the timestamps.',
       shipments,
       rows_shown: shipments.length,
-      ranked_by: params.rank_by === 'total_days' ? 'longest total duration first (size of total_days), over every shipment fetched'
+      ranked_by: params.rank_by === 'total_days' ? 'largest KLIP Total first (its size, as the page shows it), over every shipment fetched'
         : params.rank_by === 'outstanding' ? 'most outstanding first, over every shipment fetched' : 'KLIP order',
+      ...(topVessels === undefined ? {} : {
+        top_vessels: topVessels,
+        top_vessels_note:
+          'One line per vessel, as the page\'s By Vessel view: avg_total_days is the average of KLIP\'s Total ' +
+          'over that vessel\'s shipments (measured on total_measured_on of them), outstanding_mt the sum of ' +
+          'KLIP\'s apportioned outstanding. Unnamed shipments are left out. Use this, not shipments, for "top N vessels".',
+      }),
       contracts_without_shipment_excluded: backlogExcluded,
       not_available:
         'Freight, fuel consumption, pump rate and sailing speed are empty for every shipment in KLIP ' +

@@ -77,10 +77,14 @@ describe('klip_unassigned_outstanding', () => {
     const tjp = d.plants.find((p: any) => p.plant === 'TJP');
     expect(tjp.not_on_any_shipment_mt).toBe(750);      // the backlog row's outstanding
     expect(tjp.contracts_not_on_any_shipment).toBe(1);
-    // SP-3 is PLANNED with no vessel but sto_qty 0: nothing to add, and its repeated
-    // outstanding (500 MT) must NOT be counted.
-    expect(tjp.on_shipment_without_vessel_mt).toBe(0);
-    expect(tjp.without_vessel_mt).toBe(750);
+    // SP-7 is PLANNED with no vessel: KLIP's apportioned outstanding (300 MT) is counted - not its
+    // sto_qty (400) and not the contract figure that repeats on every STO (1,000).
+    expect(tjp.on_shipment_without_vessel_mt).toBe(300);
+    expect(tjp.shipments_without_vessel).toBe(1);
+    expect(tjp.without_vessel_mt).toBe(1050);
+    // SP-3 carries no apportioned outstanding: left out, and the result says so rather than
+    // falling back to the repeated per-row figure.
+    expect(d.rows_not_counted).toMatch(/^1 open shipment/);
     expect(d.top_suppliers_not_on_any_shipment[0]).toEqual({ supplier: 'BACKLOG SUPPLIER PT.', outstanding_mt: 750 });
     expect(d.plants.find((p: any) => p.plant === 'Bontang')).toBeUndefined();
   });
@@ -98,5 +102,21 @@ describe('klip_shipping_performance', () => {
     expect(d.shipments).toHaveLength(1);
     expect(d.shipments[0].vessel_name).toBe('MT. LONG HAUL');
     expect(String(d.ranked_by)).toMatch(/every shipment fetched/);
+  });
+
+  it('gives one line per vessel for a "top N vessels" question, as the page By Vessel view does', async () => {
+    // Ranking shipment rows alone let MT. LONG HAUL take two of the top three with two STOs.
+    const d = await run(m.perf as never, { cohort: 'on_going', rank_by: 'total_days', limit: 3 });
+    const names = d.top_vessels.map((v: any) => v.vessel_name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(d.top_vessels[0]).toMatchObject({ vessel_name: 'MT. LONG HAUL', shipments: 2, avg_total_days: -14, total_measured_on: 2, outstanding_mt: 600 });
+    expect(d.shipments.filter((s: any) => s.vessel_name === 'MT. LONG HAUL')).toHaveLength(2);
+  });
+
+  it('does not describe KLIP Total as a voyage duration', async () => {
+    const d = await run(m.perf as never, { rank_by: 'total_days' });
+    expect(d.sign_note).toMatch(/not the length of the voyage/);
+    expect(String(d.ranked_by)).not.toMatch(/duration/);
+    expect(m.perf.description).toMatch(/not the length of the voyage/);
   });
 });
