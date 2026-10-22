@@ -35,6 +35,16 @@ import { describe, type ToolDefinition, type ToolOutcome } from './types.js';
 const MAX_CELLS = 160;
 const CONCURRENCY = 4;
 
+/**
+ * KLIP's own placeholders for a missing value (Logistic SAP sapDisplayValue.ts). A contract
+ * with no plant carries the literal "Blank"; sent as plant=Blank the aggregate does not
+ * recognise it, IGNORES it and answers for the whole product - so the "Blank" cell came back
+ * as an exact copy of the total and the cells summed to double it (CPO, 22 Oct 2026:
+ * 746,068 MT against 373,034). KLIP's own drilldown leaves these contracts out.
+ */
+const KLIP_EMPTY_VALUES = new Set(['unknown', 'blank', 'null', 'undefined', 'n/a', 'na', 'none', '-', '—']);
+const isPlaceholder = (v: string | null): boolean => v === null || KLIP_EMPTY_VALUES.has(v.trim().toLowerCase());
+
 interface KlipSummary {
   summary?: { count?: number; openOutstandingQty?: number; closeOutstandingQty?: number };
   statusCardSummary?: { openOutstandingQty?: number; openOnTimeCount?: number; openLateCount?: number; closeOnTimeCount?: number; closeLateCount?: number };
@@ -130,8 +140,17 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
       cache.keyFor('klip_outstanding_breakdown', { product: params.product, by: params.by, from: window?.from, to: window?.to }),
       async () => {
         // 1) Which plants and incoterms actually have contracts for this product.
+        //    Pages at the route's maximum, so the walk covers ten times the rows it used to.
         const filters = buildFilters(routes.contracts, { product: params.product });
-        const walked = await walk<Row>({ route: routes.contracts, filters: filters.upstream, calls });
+        const walked = await walk<Row>({ route: routes.contracts, filters: filters.upstream, pageSize: routes.contracts.maxLimit, calls });
+        // KLIP's own complete lists. Plants found on rows must be on KLIP's list, and when the
+        // walk cannot see every row, a one-dimension split asks about the whole list instead
+        // (empty cells are dropped below), so no plant or incoterm goes missing.
+        const [canonicalPlants, canonicalIncoterms] = await Promise.all([
+          params.by === 'incoterm' ? undefined : fetchOne<string[]>(routes.filterOptionsGroupPlants.path, routes.filterOptionsGroupPlants.rowsPath, calls).catch(() => undefined),
+          params.by === 'plant' ? undefined : fetchOne<string[]>(routes.filterOptionsIncoterms.path, routes.filterOptionsIncoterms.rowsPath, calls).catch(() => undefined),
+        ]);
+        const knownPlant = Array.isArray(canonicalPlants) ? new Set(canonicalPlants.map((p) => p.trim().toUpperCase())) : undefined;
         const wantedProduct = params.product?.trim().toLowerCase();
         const pairs = new Map<string, { plant: string | null; incoterm: string | null }>();
         for (const row of walked.rows) {
@@ -142,7 +161,21 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
           const plant = params.by === 'incoterm' ? null : pickString(row, fields.contract.plant)?.trim() || null;
           const incoterm = params.by === 'plant' ? null : pickString(row, fields.contract.incoterm)?.trim() || null;
           if ((params.by !== 'incoterm' && plant === null) || (params.by !== 'plant' && incoterm === null)) continue;
+          if (params.by !== 'incoterm' && (isPlaceholder(plant) || (knownPlant !== undefined && !knownPlant.has((plant ?? '').toUpperCase())))) continue;
           pairs.set(`${plant ?? ''}|${incoterm ?? ''}`, { plant, incoterm });
+        }
+        let discoveredFrom = 'contract rows';
+        let discoveryComplete = !walked.truncated;
+        if (walked.truncated && params.by === 'plant' && Array.isArray(canonicalPlants)) {
+          pairs.clear();
+          for (const p of canonicalPlants) if (!isPlaceholder(p)) pairs.set(`${p}|`, { plant: p, incoterm: null });
+          discoveredFrom = 'KLIP filter-options/group-plants (the contract list was too long to read whole)';
+          discoveryComplete = true;
+        } else if (walked.truncated && params.by === 'incoterm' && Array.isArray(canonicalIncoterms)) {
+          pairs.clear();
+          for (const i of canonicalIncoterms) pairs.set(`|${i}`, { plant: null, incoterm: i });
+          discoveredFrom = 'KLIP filter-options/incoterms (the contract list was too long to read whole)';
+          discoveryComplete = true;
         }
         const all = [...pairs.values()].sort((a, b) => `${a.plant}${a.incoterm}`.localeCompare(`${b.plant}${b.incoterm}`));
         const asked = all.slice(0, MAX_CELLS);
@@ -161,6 +194,8 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
           walkTruncated: walked.truncated,
           walkFetched: walked.fetchedRows,
           walkTotal: walked.totalRows,
+          discoveredFrom,
+          discoveryComplete,
         };
       },
       { ttlSeconds: cfg.KLIP_BREAKDOWN_CACHE_TTL_SECONDS },
@@ -170,15 +205,28 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
     if (v.cells.length === 0 && !v.wholeAvailable) {
       throw invalidParams('KLIP returned no outstanding figures for this filter. Check the product name with klip_reference.');
     }
-    const failed = v.cells.filter((c) => c.open_outstanding_mt === null && c.close_outstanding_mt === null).length;
-    const shown = v.cells
+    // A cell identical to the whole product, while other cells hold quantity too, is KLIP
+    // having IGNORED that cell's filter (it answers an unknown value with the unfiltered
+    // figure). Rejected and named, never shown as a figure: it is not that cell's number.
+    // A product genuinely in one cell is untouched - there is no other non-empty cell.
+    const w = v.whole;
+    const isWhole = (c: Cell): boolean =>
+      v.wholeAvailable && c.open_outstanding_mt !== null &&
+      c.open_outstanding_mt === w.open_outstanding_mt && c.close_outstanding_mt === w.close_outstanding_mt &&
+      c.late_contracts === w.late_contracts;
+    const nonEmpty = (c: Cell): boolean => (c.open_outstanding_mt ?? 0) !== 0 || (c.close_outstanding_mt ?? 0) !== 0 || (c.late_contracts ?? 0) !== 0;
+    const rejected = v.cells.filter((c) => isWhole(c) && v.cells.some((o) => o !== c && nonEmpty(o)));
+    const cells = v.cells.filter((c) => !rejected.includes(c));
+
+    const failed = cells.filter((c) => c.open_outstanding_mt === null && c.close_outstanding_mt === null).length;
+    const shown = cells
       .filter((c) => params.include_empty || (c.open_outstanding_mt ?? 0) !== 0 || (c.close_outstanding_mt ?? 0) !== 0)
       .sort((a, b) => (b.open_outstanding_mt ?? 0) - (a.open_outstanding_mt ?? 0));
 
-    const sumOpen = v.cells.reduce((s, c) => s + (c.open_outstanding_mt ?? 0), 0);
-    const sumClose = v.cells.reduce((s, c) => s + (c.close_outstanding_mt ?? 0), 0);
+    const sumOpen = cells.reduce((s, c) => s + (c.open_outstanding_mt ?? 0), 0);
+    const sumClose = cells.reduce((s, c) => s + (c.close_outstanding_mt ?? 0), 0);
     const wholeOpen = v.whole.open_outstanding_mt;
-    const reconciles = wholeOpen !== null && v.skipped === 0 && failed === 0 && !v.walkTruncated
+    const reconciles = wholeOpen !== null && v.skipped === 0 && failed === 0 && v.discoveryComplete
       ? Math.abs(sumOpen - wholeOpen) <= Math.max(0.5, Math.abs(wholeOpen) * 0.005)
       : null;
 
@@ -209,7 +257,15 @@ export const outstandingBreakdown: ToolDefinition<typeof inputShape> = {
     };
     if (v.skipped > 0) data.cells_skipped = `${v.skipped} more combinations exist than the ${MAX_CELLS}-cell limit allows; narrow by product.`;
     if (failed > 0) data.cells_failed = `${failed} cells returned no figure from KLIP and are shown as null.`;
-    if (v.walkTruncated) {
+    if (rejected.length > 0) {
+      data.cells_rejected = rejected.map((c) => ({
+        plant: c.plant,
+        incoterm: c.incoterm,
+        reason: 'KLIP answered with the whole-product figure, so it ignored this filter value. Not this cell\'s number; left out of the cells and the sum.',
+      }));
+    }
+    data.cells_found_from = v.discoveredFrom;
+    if (!v.discoveryComplete) {
       data.discovery_warning =
         `The contract list used to find which plant/incoterm combinations exist hit its page bound (${v.walkFetched} of ` +
         `${v.walkTotal ?? 'an unknown number of'} rows), so a combination may be missing from the table. ` +

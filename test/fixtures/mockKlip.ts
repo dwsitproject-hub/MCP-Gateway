@@ -29,6 +29,12 @@ export interface MockState {
   rejectCredentials: boolean;
   /** Adds a no-shipment contract and a long voyage to /shipments/performance. */
   perfExtras?: boolean;
+  /**
+   * /late-performance/summary answers each known plant and incoterm with its own figure, and an
+   * unknown value with the whole-product one, as KLIP does. Off by default: other suites assert
+   * the single narrowed figure.
+   */
+  summaryPerCell?: boolean;
 }
 
 const PLANTS = ['TJP', 'Sei Mangkei', 'Dumai'];
@@ -908,7 +914,17 @@ export function createMockKlip(state: MockState): Express {
       req.query.dateFrom !== undefined ||
       req.query.dateTo !== undefined;
     const narrowed = ungatedFilter || (gated && gatedFilter);
-    const n = narrowed ? 40 : 254;
+    let n = narrowed ? 40 : 254;
+    // A plant or incoterm KLIP recognises narrows the figure; one it does not (the "Blank"
+    // placeholder) is IGNORED and answered as if absent - the whole-product figure, which is
+    // the bug the breakdown's ignored-filter guard exists for.
+    if (gated && state.summaryPerCell === true) {
+      const plant = typeof req.query.plant === 'string' ? req.query.plant : undefined;
+      const inc = typeof req.query.incoterms === 'string' ? req.query.incoterms : undefined;
+      const knownIncoterms = ['FOB', 'Loco', 'Franco', 'CIF', 'CFR', 'FRC', 'LCO'];
+      if (plant !== undefined && PLANTS.includes(plant)) n -= 7 + 3 * PLANTS.indexOf(plant);
+      if (inc !== undefined && knownIncoterms.includes(inc)) n -= 1 + knownIncoterms.indexOf(inc);
+    }
     res.json({
       success: true,
       data: {

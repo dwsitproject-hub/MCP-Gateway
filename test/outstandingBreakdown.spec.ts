@@ -32,6 +32,7 @@ beforeAll(async () => {
   process.env.KLIP_MAX_PAGES = '10';
   process.env.KLIP_PAGE_SIZE = '100';
   state = freshState();
+  state.summaryPerCell = true;
   ({ server } = await startMockKlip(PORT, state));
   tool = (await import('../src/tools/klip/outstandingBreakdown.js')).outstandingBreakdown;
   cache = await import('../src/core/cache.js');
@@ -92,6 +93,52 @@ describe('klip_outstanding_breakdown', () => {
     const out = await run({ by: 'plant', all_time: true });
     for (const c of summaryCalls()) expect(c.query.dateFrom).toBeUndefined();
     expect((out.data as { period: string }).period).toMatch(/All time/);
+  });
+
+  /** Adds contracts for one test and takes them away again, whatever the test does. */
+  async function withContracts<T>(extra: Array<Partial<(typeof state.contracts)[number]>>, fn: () => Promise<T>): Promise<T> {
+    const before = state.contracts.length;
+    const base = state.contracts[0]!;
+    state.contracts.push(...extra.map((e, i) => ({ ...base, id: `EXTRA-${i}`, ...e }) as (typeof state.contracts)[number]));
+    try { return await fn(); } finally { state.contracts.splice(before); }
+  }
+
+  it('never asks KLIP about the "Blank" plant placeholder', async () => {
+    // Production, 22 Oct 2026: plant=Blank is ignored by KLIP, so that cell was a copy of the
+    // CPO total and the cells summed to double it (746,068 MT against 373,034).
+    const out = await withContracts([{ plant_site: 'Blank' }, { plant_site: 'Blank', incoterm: 'CIF' }], () => run({ by: 'plant' }));
+    expect(summaryCalls().some((c) => c.query.plant === 'Blank')).toBe(false);
+    const data = out.data as { cells: Array<{ plant: string }> };
+    expect(data.cells.some((c) => c.plant === 'Blank')).toBe(false);
+  });
+
+  it('rejects a cell that is a copy of the total, and still reconciles the rest', async () => {
+    // A long contract list makes the tool ask about KLIP's whole plant list. "Trading" and
+    // "TJ PURA" are on that list but unknown to the aggregate, which answers them with the
+    // whole-product figure - the shape of the Blank bug, for a value that passed every check.
+    const many = Array.from({ length: 1100 }, (_, i) => ({ plant_site: ['TJP', 'Sei Mangkei', 'Dumai'][i % 3]! }));
+    const out = await withContracts(many, () => run({ by: 'plant' }));
+    const data = out.data as {
+      cells: Array<{ plant: string }>;
+      cells_rejected?: Array<{ plant: string; reason: string }>;
+      cells_found_from: string;
+      discovery_warning?: string;
+      reconciliation: { cells_add_up_to_total: boolean | null };
+    };
+    expect(data.cells_found_from).toMatch(/group-plants/);
+    expect(data.discovery_warning).toBeUndefined();
+    expect(data.cells_rejected?.map((r) => r.plant).sort()).toEqual(['TJ PURA', 'Trading']);
+    expect(data.cells_rejected?.[0]?.reason).toMatch(/ignored this filter/);
+    expect(data.cells.some((c) => c.plant === 'Trading' || c.plant === 'TJ PURA')).toBe(false);
+    // Checked rather than skipped, now that every plant was asked about.
+    expect(data.reconciliation.cells_add_up_to_total).not.toBeNull();
+  });
+
+  it('keeps a product that genuinely sits in one plant, even though that cell equals the total', async () => {
+    const out = await withContracts([{ product: 'SOLO', plant_site: 'Trading' }], () => run({ by: 'plant', product: 'SOLO' }));
+    const data = out.data as { cells: Array<{ plant: string }>; cells_rejected?: unknown[] };
+    expect(data.cells.map((c) => c.plant)).toEqual(['Trading']);
+    expect(data.cells_rejected).toBeUndefined();
   });
 
   it('refuses a product KLIP does not know, before any aggregate call', async () => {
