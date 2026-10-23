@@ -117,6 +117,9 @@ export const fields = {
     contractValue: ['contract_value', 'contractValue', 'nilai_kontrak'],
     currency: ['currency', 'curr', 'mata_uang'],
     contractDate: ['contractDate', 'contract_date', 'tanggalKontrak', 'date'],
+    // The list's "Due Date Delivery End": MAX(c.delivery_end_date) per contract in Logistic
+    // SAP contract.controller.ts (getContractsUncached). Mapped 22 Oct 2026.
+    deliveryEndDate: ['delivery_end_date'],
     /**
      * REMOVED 14 Sep 2026. Absent from all 50 list rows and all 10 detail records in
      * production; KLIP carries a remarks_count on the list and no text anywhere. The

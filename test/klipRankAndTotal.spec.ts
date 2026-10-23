@@ -56,6 +56,13 @@ describe('klip_top_contracts', () => {
     expect(os.every((v: number) => v > 0)).toBe(true);
     const dates = d.contracts.map((c: any) => c.contract_date).filter(Boolean).sort();
     if (d.latest_contract && dates.length) expect(d.latest_contract.contract_date >= dates[0]).toBe(true);
+    // KLIP's "Due Date Delivery End", as the row carries it.
+    // A contract without one (the mock's hand-written rows) reports null, never a guess.
+    expect(d.contracts.every((c: any) => c.delivery_end_date === null || /^\d{4}-\d{2}-\d{2}$/.test(c.delivery_end_date))).toBe(true);
+    expect(d.contracts.some((c: any) => c.delivery_end_date !== null)).toBe(true);
+    // And it is the delivery date, not the contract date under another name: the mock's two
+    // dates never coincide, so a mapping pointed at the wrong column fails here.
+    expect(d.contracts.filter((c: any) => c.delivery_end_date !== null).every((c: any) => c.delivery_end_date !== c.contract_date)).toBe(true);
     // No gateway totals beside KLIP's: suppliers are KLIP's own figure, from another tool.
     expect(d.top_suppliers).toBeUndefined();
     expect(d.suppliers).toMatch(/klip_performance_summary/);

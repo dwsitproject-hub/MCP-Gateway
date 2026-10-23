@@ -62,6 +62,7 @@ export interface MockContract {
   quantity_delivery: string | null;
   quantity_receive: string | null;
   contract_date: string;
+  delivery_end_date?: string;
   remarks: string;
   /** Optional so the awkward-case rows below need not restate them. */
   unit_price?: number;
@@ -89,6 +90,7 @@ export function buildContracts(): MockContract[] {
       quantity_delivery: '400000' + i * 500,
       quantity_receive: '300000' + i * 500,
       contract_date: `2026-0${(i % 8) + 1}-1${i % 9}`,
+      delivery_end_date: `2026-${String((i % 8) + 2).padStart(2, '0')}-2${i % 9}`,
       remarks: `Routine shipment note ${i}.`,
       /**
        * PRICE. unit_price is PER KILOGRAM and quantity_ordered is kilograms, so

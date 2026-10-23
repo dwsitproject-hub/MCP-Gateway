@@ -38,6 +38,7 @@ interface Ranked {
   plant: string | null;
   incoterm: string | null;
   contract_date: string | null;
+  delivery_end_date: string | null;
   quantity_ordered_mt: number | null;
   outstanding_mt: number;
 }
@@ -47,8 +48,8 @@ export const topContracts: ToolDefinition<typeof inputShape> = {
   title: 'KLIP contracts with the most outstanding',
   cap: CAP,
   description: describe(
-    'Contracts ranked by KLIP\'s own outstanding quantity (MT), largest first, with supplier, plant, incoterm and ' +
-      'contract date - plus the most recent contract that still has outstanding. Filter by product and plant; status ' +
+    'Contracts ranked by KLIP\'s own outstanding quantity (MT), largest first, with supplier, plant, incoterm, ' +
+      'contract date and delivery due date (KLIP\'s "Due Date Delivery End") - plus the most recent contract that still has outstanding. Filter by product and plant; status ' +
       'defaults to Open. Use for "which contracts have the most outstanding". Every figure is KLIP\'s own, per ' +
       'contract; this tool only puts them in order and totals nothing. For SUPPLIERS with the most outstanding use ' +
       'klip_performance_summary with group_by supplier, which is KLIP\'s own supplier figure. The ranking covers every ' +
@@ -85,6 +86,7 @@ export const topContracts: ToolDefinition<typeof inputShape> = {
         plant: pickString(row, f.plant),
         incoterm: pickString(row, f.incoterm),
         contract_date: toDateOnly(pickString(row, f.contractDate)),
+        delivery_end_date: toDateOnly(pickString(row, f.deliveryEndDate)),
         quantity_ordered_mt: kgToMt(pickNumber(row, f.qtyPo)),
         outstanding_mt: os,
       });
